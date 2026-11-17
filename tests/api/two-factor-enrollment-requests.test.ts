@@ -1,5 +1,5 @@
 /**
- * First-time 2FA enrolment on a `required` app (PFL-769): what goes on the wire, and whose credential.
+ * First-time 2FA enrolment on a `required` app: what goes on the wire, and whose credential.
  *
  * Requests run through the real AxiosClient and TwoFactorService, interceptors included, and stop at
  * a capturing adapter. A stored session must never replace the `tfa_token` or the setup link's session.

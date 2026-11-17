@@ -1,5 +1,5 @@
 /**
- * Event cleanup (PFL-792, architecture §8), labels part: every `Error` the SDK emits carries an
+ * Event cleanup, labels part: every `Error` the SDK emits carries an
  * `operation`, and one failure produces one `Error` (the innermost reporter wins).
  *
  * SignOut part (§2.8, §8.3): `logOut()` and `reset()` emit exactly one `SignOut{origin:'this-tab',

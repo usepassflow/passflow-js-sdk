@@ -1,5 +1,5 @@
 /**
- * Amendment A1 (PFL-792): every sign-in starts a new session in the refresh controller, not only
+ * Every sign-in starts a new session in the refresh controller, not only
  * the paths that emit `SignIn`/`Register` themselves. A tab that signed out, or whose session
  * ended, and then signs in again through its second factor (code, recovery code, a PKCE app's
  * code exchange) or `setTokens()` refreshes normally at the next expiry.

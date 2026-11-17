@@ -1,4 +1,4 @@
-// Ported from passflow-saas-portal src/state/refresh-lineage.test.ts (PFL-764 round 18-19).
+// Ported from passflow-saas-portal src/state/refresh-lineage.test.ts.
 // Refresh tokens are ordered by their own claims (sub, iat in seconds, sid), not by a remembered
 // list of retired fingerprints, so no rotation count can make an old token adoptable again.
 import { describe, expect, it, vi } from 'vitest';

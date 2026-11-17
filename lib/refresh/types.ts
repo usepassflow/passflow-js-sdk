@@ -1,5 +1,5 @@
 /**
- * Public types of multi-tab-safe token refresh (PFL-792, architecture §2.2-2.5).
+ * Public types of multi-tab-safe token refresh.
  *
  * @module refresh/types
  */

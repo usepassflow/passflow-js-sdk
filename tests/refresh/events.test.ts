@@ -1,5 +1,5 @@
 /**
- * Exact per-tab event sequences on real `Passflow` tabs (PFL-792 architecture §2.4, §2.5).
+ * Exact per-tab event sequences on real `Passflow` tabs.
  *
  * Re-records the portal's `passflow-events.sdk.test.ts` against the new contract: one `Error` per
  * failure with an `operation` (and, for refreshes, `source` and `refresh`), `Refresh.source`,

@@ -1,5 +1,5 @@
 /**
- * PFL-792 acceptance scenarios (architecture §2.13, §9.3) on real `Passflow` instances as tabs.
+ * Multi-tab refresh acceptance scenarios on real `Passflow` instances as tabs.
  *
  * Shared storage, a per-tab fake coordinator on one virtual clock (random = 0), HTTP through
  * `vi.spyOn(AuthAPI.prototype, 'refreshToken')` (tests/refresh/sdk-tabs.ts). Logout (#8, #16) is

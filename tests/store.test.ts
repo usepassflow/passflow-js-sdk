@@ -1,5 +1,5 @@
 /**
- * PassflowStore error reporting (PFL-792, architecture §2.5, §8): one `Error` per failure.
+ * PassflowStore error reporting: one `Error` per failure.
  */
 import { describe, expect, test, vi } from 'vitest';
 import { markReported, notifyError } from '../lib/error-report';

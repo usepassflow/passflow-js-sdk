@@ -74,7 +74,7 @@ const isUpgradeChallengeResponse = (response: AxiosResponse): boolean => readUpg
 export type AxiosUpgradeHandler = (error: AxiosError, challenge: UpgradeChallenge) => Promise<AxiosResponse>;
 
 /**
- * The pre-request refresh (PFL-792). Installed by `Passflow` on every client it owns; it asks the
+ * The pre-request refresh. Installed by `Passflow` on every client it owns; it asks the
  * instance's refresh controller, which coordinates with the other tabs and owns retries, strikes
  * and the session end. Resolves with the tokens to send (`undefined` once the session ended).
  *
@@ -310,7 +310,7 @@ export class AxiosClient {
         // normally while a prompt is open.
         //
         // A 401 from `/auth/refresh` itself never invalidates here: the refresh controller
-        // classifies it and invalidates only at a real session end (PFL-792).
+        // classifies it and invalidates only at a real session end.
         // A 401 from the hosted session's endpoints is about the cookie session and never marks the
         // stored token session invalid.
         if (

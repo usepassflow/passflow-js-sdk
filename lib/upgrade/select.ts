@@ -4,7 +4,7 @@
  * The challenge names what the server wants (`acrValues`, `maxAge`); this
  * module decides which of the SDK's registered factors to offer and which one
  * leads. The first entry is the "suggested" method the UI renders immediately
- * — everything after it sits behind "use another way" (PFL-509).
+ * — everything after it sits behind "use another way".
  *
  * ## Rank, never filter
  *
@@ -100,7 +100,7 @@ const rank = (factor: UpgradeFactor, demanded: number | undefined): number => {
  * Orders the factors to offer for a challenge. Index 0 is the suggested
  * method; the rest are the "use another way" alternatives.
  *
- * The suggested slot is not only a UX choice: PFL-510 treats a non-suggested
+ * The suggested slot is not only a UX choice: risk scoring treats a non-suggested
  * choice as a minor risk signal, so whatever leads here becomes the behavioural
  * baseline deviation is measured against.
  *
@@ -118,12 +118,10 @@ export const selectFactors = (available: readonly UpgradeFactor[], challenge: Up
 };
 
 /*
- * TODO(PFL-497): narrow `available` to the user's enrolled factors before this
- * runs. Today the SDK would need two calls — `GET /user/passkey` and
+ * `available` is not narrowed to the user's enrolled factors before this
+ * runs. Doing so would need two calls — `GET /user/passkey` and
  * `GET /v2/user/2fa/methods` — and would have to reimplement the union rule the
  * server already owns privately in `upgradeMethodRegistered`. That rule is
- * scheduled to change (passkeys move into the method registry), so duplicating
- * it client-side would break on a backend release. Wire this to the single
- * `?purpose=upgrade` discovery endpoint once it exists; until then an
- * unenrolled suggestion costs one refused prepare round.
+ * not stable, so duplicating it client-side could break on a backend release.
+ * An unenrolled suggestion costs one refused prepare round.
  */

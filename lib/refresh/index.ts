@@ -1,5 +1,5 @@
 /**
- * Multi-tab-safe token refresh (PFL-792).
+ * Multi-tab-safe token refresh.
  *
  * The public surface (re-exported from the package entry, `lib/index.ts`) is the types in
  * `types.ts`, {@link PassflowRefreshError}, {@link RefreshErrorId},

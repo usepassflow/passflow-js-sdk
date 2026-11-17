@@ -1,5 +1,5 @@
 /**
- * Cross-tab sign-out on real `Passflow` instances (PFL-792 §2.8, §2.9.9, §2.13 #8 and #16).
+ * Cross-tab sign-out on real `Passflow` instances.
  *
  * Every tab is a `Passflow` over one shared storage, coordinated through the fake Web Locks and
  * BroadcastChannel on a virtual clock (tests/refresh/fakes.ts). Only HTTP is stubbed:

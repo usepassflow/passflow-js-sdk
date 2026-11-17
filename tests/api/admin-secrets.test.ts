@@ -1,7 +1,7 @@
 /// <reference types="vitest" />
 
 /**
- * Admin settings secrets (PFL-770): write-only app secrets and masked server settings values.
+ * Admin settings secrets: write-only app secrets and masked server settings values.
  * Imports come from the package entry point so the test also proves these names are exported.
  */
 

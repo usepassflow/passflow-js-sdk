@@ -1,5 +1,5 @@
 /**
- * Refresh token ordering. Port of the portal's `refresh-lineage.ts` (PFL-764 rounds 14-19).
+ * Refresh token ordering. Port of the portal's `refresh-lineage.ts`.
  *
  * Cross-tab messages name refresh tokens by fingerprint and their issue time, never by extra
  * tokens, so a tab can tell which session and which link of the rotation a message is about.

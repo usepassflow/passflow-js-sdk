@@ -47,7 +47,7 @@ export const tok = null as Token | null;
 export const ch: UpgradeChallenge | undefined = parseUpgradeChallenge(401, () => null);
 export const v: string = SDK_VERSION;
 
-// Multi-tab-safe token refresh (PFL-792): config, coordinator transports, events, errors.
+// Multi-tab-safe token refresh: config, coordinator transports, events, errors.
 declare const coordinator: RefreshCoordinator;
 export const refreshConfig: PassflowConfig = { appId: 'app', refreshCoordination: coordinator, refreshStrikes: 3 };
 export const localConfig: PassflowConfig = { refreshCoordination: 'none' };
@@ -67,7 +67,7 @@ export const authIds: readonly string[] = REFRESH_AUTH_FAILURE_IDS;
 export const dispose: () => void = () => pf.dispose();
 export const signedOut: PassflowEventPayload[PassflowEvent.SignOut] = { origin: 'this-tab', userId: 'u' };
 
-// Email verification code step (PFL-724): guard, step and code types, event, verifyEmailCode.
+// Email verification code step: guard, step and code types, event, verifyEmailCode.
 declare const answer: PassflowAuthorizationResponse;
 export const step: PassflowEmailVerificationStep | undefined = isEmailVerificationStep(answer) ? answer : undefined;
 export const emailOp: PassflowEmailVerificationOperation = 'sign-up';
@@ -80,7 +80,7 @@ export const emailEv: PassflowEvent = PassflowEvent.EmailVerificationRequired;
 export const codePayload: PassflowEmailCodePayload = { challenge_id: 'c', otp: '123456' };
 export const verified: Promise<PassflowAuthorizationResponse> = pf.verifyEmailCode(codePayload);
 
-// Admin settings secrets (PFL-770): write-only app secret names, masked server settings values.
+// Admin settings secrets: write-only app secret names, masked server settings values.
 export const secretNames: readonly AppSecretName[] = APP_SECRET_NAMES;
 export const secretName: AppSecretName = 'fcm_server_key';
 export const masked: MaskedSecret = `${MASKED_SECRET_PREFIX}********`;

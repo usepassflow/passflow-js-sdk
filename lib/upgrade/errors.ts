@@ -82,7 +82,7 @@ export const UpgradeErrorIds = {
  *
  * `error.2fa.not_enabled` was missing from this list, which signed out a user
  * who had no 2FA enrolled the moment an elevation reached the commit round —
- * the exact lock-out PFL-497 exists to prevent. The set is kept complete for
+ * the exact lock-out the upgrade flow must never cause. The set is kept complete for
  * documentation and for callers, but the invalidation decision no longer rests
  * on it: see `invalidatesSessionOnCommit`, which is the inverse predicate.
  */

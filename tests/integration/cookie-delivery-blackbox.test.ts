@@ -543,7 +543,7 @@ describe('Cookie Delivery Support - Black Box Tests', () => {
 });
 
 /**
- * REQ-6: Refresh in cookie and BFF mode (PFL-792 architecture §2.11), on real `Passflow` tabs.
+ * REQ-6: Refresh in cookie and BFF mode, on real `Passflow` tabs.
  *
  * No refresh token is readable in these modes, so there is no token fence: what applies is the
  * lock, `session-refreshed` adoption, the classification, the schedule and the strikes. A

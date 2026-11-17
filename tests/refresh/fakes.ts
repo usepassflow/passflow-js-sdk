@@ -1,6 +1,6 @@
 /**
- * Test doubles for cross-tab refresh (port of the portal's `cross-tab-refresh.fakes.ts`,
- * PFL-764): one Web Locks manager, one BroadcastChannel hub and one storage that N simulated tabs
+ * Test doubles for cross-tab refresh (port of the portal's `cross-tab-refresh.fakes.ts`):
+ * one Web Locks manager, one BroadcastChannel hub and one storage that N simulated tabs
  * share, on one virtual clock.
  *
  * Realistic orderings. Browsers order neither lock grants against channel messages nor either

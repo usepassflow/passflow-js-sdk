@@ -209,7 +209,7 @@ export class Passflow {
     this.scopes = scopes ?? DEFAULT_SCOPES;
     this.createTenantForNewUser = config.createTenantForNewUser ?? false;
 
-    // How this instance coordinates token refresh with the other tabs (PFL-792). The refresh
+    // How this instance coordinates token refresh with the other tabs. The refresh
     // controller is created by AuthService, which owns the delivery mode its transport needs.
     const coordination = resolveCoordination(config.refreshCoordination, this.platform, config.keyStoragePrefix, {
       tokenKeys: () => this.storageManager.tokenKeys(),
@@ -1396,7 +1396,7 @@ export class Passflow {
     }
   }
 
-  /** The one `SignOut` of `logOut()`/`reset()` in this tab (PFL-792 §2.4). */
+  /** The one `SignOut` of `logOut()`/`reset()` in this tab. */
   private notifySignedOut(userId: string | undefined): void {
     this.subscribeStore.notify(
       PassflowEvent.SignOut,

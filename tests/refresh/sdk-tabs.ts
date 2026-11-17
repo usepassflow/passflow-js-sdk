@@ -1,5 +1,5 @@
 /**
- * Real `Passflow` instances as browser tabs (PFL-792 architecture §2.12), for the black-box
+ * Real `Passflow` instances as browser tabs, for the black-box
  * multi-tab and event suites.
  *
  * Every tab is a `Passflow` over one shared storage, coordinated through the fake Web Locks and

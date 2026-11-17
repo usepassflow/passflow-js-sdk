@@ -1,5 +1,5 @@
 /**
- * One `Error` event per failure (PFL-792, architecture §2.5 and §8).
+ * One `Error` event per failure.
  *
  * Kept apart from `store.ts` on purpose: unit tests automock that module, and the services must
  * still reach the real dedupe through it. This module imports nothing at runtime, so `store.ts`

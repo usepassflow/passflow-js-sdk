@@ -1,5 +1,5 @@
 /**
- * The pre-request refresh of AxiosClient (PFL-792, architecture §3.3 / §2.8 row "SDK API call").
+ * The pre-request refresh of AxiosClient.
  *
  * Real AxiosClient over a real StorageManager; only the HTTP adapter is stubbed. The refresh
  * handler stands in for the refresh controller (`Passflow` installs `ensureFresh`).

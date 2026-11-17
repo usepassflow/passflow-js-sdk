@@ -1,5 +1,5 @@
 /**
- * Refresh coordination constants (PFL-792).
+ * Refresh coordination constants.
  *
  * Names and timings are normative: architecture §2.7 (timing) and §2.10 (wire names). The base
  * lock and channel names match the portal's `cross-tab-refresh.ts`, so tabs running the portal

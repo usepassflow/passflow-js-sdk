@@ -1,6 +1,6 @@
 /**
  * The credential fence: every storage read and write of the refresh path (architecture §5.4).
- * Port of the portal's `refresh-credential-fence.ts` (PFL-764 rounds 11-25) without the wrapping:
+ * Port of the portal's `refresh-credential-fence.ts` without the wrapping:
  * the portal monkey-patched `authApi.refreshToken` and `storageManager.saveTokens` and threw
  * replacement errors; here the controller calls the fence directly and gets verdicts back.
  *

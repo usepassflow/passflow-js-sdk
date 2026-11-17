@@ -4,7 +4,7 @@
  * Tests for the TokenCacheService which handles:
  * - Token caching and parsing
  * - Token expiration checking
- * - Automatic token refresh (through the attached refresh controller, PFL-792)
+ * - Automatic token refresh (through the attached refresh controller)
  * - Visibility/page lifecycle management
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -296,8 +296,8 @@ describe('TokenCacheService', () => {
       expect(mockAuthApi.refreshToken).not.toHaveBeenCalled();
     });
 
-    // PFL-792 §9.4: was "the cached tokens are sent directly to authApi"; the attached
-    // controller sends the STORED tokens and saves the answer.
+    // The attached controller sends the STORED tokens, not the cached ones, and saves the
+    // answer.
     test('refreshes expired tokens through the attached controller, sending the stored tokens', async () => {
       const { stored } = attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockResolvedValue(ROTATED);
@@ -314,7 +314,7 @@ describe('TokenCacheService', () => {
       expect(stored()?.refresh_token).toBe(ROTATED.refresh_token);
     });
 
-    // PFL-792 §2.1 item 6: no attached controller, no refresh.
+    // No attached controller, no refresh.
     test('without an attached refresh controller returns the cache and sends nothing', async () => {
       tokenCacheService.setTokensCache(EXPIRED_TOKENS);
 
@@ -324,7 +324,7 @@ describe('TokenCacheService', () => {
       expect(mockAuthApi.refreshToken).not.toHaveBeenCalled();
     });
 
-    // PFL-792 §2.8: was "does not refresh when tokenExpiredFlag is set"; the flag is output only.
+    // tokenExpiredFlag is output only: it never gates a refresh.
     test('refreshes even when tokenExpiredFlag is set: the flag never gates a refresh', async () => {
       attachController(EXPIRED_TOKENS);
       tokenCacheService.tokenExpiredFlag = true;
@@ -461,7 +461,6 @@ describe('TokenCacheService', () => {
       expect(mockStore.notify).toHaveBeenCalledWith(PassflowEvent.TokenCacheExpired, { isExpired: false });
     });
 
-    // PFL-792 §9.4, pinned defect 3 (R5): was "clears cache on refresh error".
     test('keeps the cache on a transient refresh error', async () => {
       attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValue(new Error('Network error'));
@@ -472,8 +471,7 @@ describe('TokenCacheService', () => {
       expect(tokenCacheService.tokensCache).toEqual(EXPIRED_TOKENS);
     });
 
-    // PFL-792 §9.4: was "resets isRefreshing flag even on error"; isRefreshing now mirrors
-    // "this instance has a cycle", so it stays set while the retry is pending.
+    // isRefreshing mirrors "this instance has a cycle", so it stays set while the retry is pending.
     test('isRefreshing stays set while a retry is pending and clears once it settles', async () => {
       attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce(ROTATED);
@@ -490,8 +488,7 @@ describe('TokenCacheService', () => {
   });
 
   describe('Session Expired Handling', () => {
-    // PFL-792 §9.4, pinned defect 3 (R5): was "emits SessionExpired event when refresh fails"
-    // with a plain Error, which is a transient failure.
+    // A plain Error is a transient failure, so it does not end the session.
     test('a transient refresh failure emits no SessionExpired', async () => {
       attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValue(new Error('Refresh token expired'));
@@ -502,7 +499,7 @@ describe('TokenCacheService', () => {
       expect(notified(PassflowEvent.RefreshFailing)).toHaveLength(1);
     });
 
-    // PFL-792 §9.4 auth-strike variant (R4): the session does end after refreshStrikes auth failures.
+    // The session does end after refreshStrikes auth failures.
     test('auth failures end the session after refreshStrikes (3): SessionExpired{refresh_failed} once', async () => {
       const { stored } = attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValue(AUTH_FAILURE());
@@ -518,8 +515,7 @@ describe('TokenCacheService', () => {
       expect(stored()).toBeUndefined();
     });
 
-    // PFL-792 §9.4: was "sets tokenExpiredFlag to prevent infinite refresh loops"; the loop is now
-    // prevented by one pending retry that every caller joins.
+    // Refresh loops are prevented by one pending retry that every caller joins.
     test('a transient failure leaves one pending retry: a second call joins it, one request', async () => {
       attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValueOnce(new Error('Refresh token expired')).mockResolvedValueOnce(ROTATED);
@@ -537,7 +533,6 @@ describe('TokenCacheService', () => {
       expect(mockAuthApi.refreshToken).toHaveBeenCalledTimes(2);
     });
 
-    // PFL-792 §9.4, pinned defect 3 (R5): was "deletes tokens from storage when refresh fails".
     test('keeps stored tokens when a refresh fails transiently', async () => {
       const { stored } = attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValue(new Error('Refresh token expired'));
@@ -548,8 +543,7 @@ describe('TokenCacheService', () => {
       expect(stored()).toEqual(EXPIRED_TOKENS);
     });
 
-    // PFL-792 §9.4: was "stops token check interval when refresh fails"; after the strikes end the
-    // session stays ended: no further request, no second SessionExpired.
+    // After the strikes end the session stays ended: no further request, no second SessionExpired.
     test('after the strikes end, time passing brings no further request or SessionExpired', async () => {
       attachController(EXPIRED_TOKENS);
       tokenCacheService.startTokenCheck();
@@ -564,8 +558,7 @@ describe('TokenCacheService', () => {
       expect(notified(PassflowEvent.SessionExpired)).toHaveLength(1);
     });
 
-    // PFL-792 §9.4: was "does not retry refresh after SessionExpired" (gated by the flag); now the
-    // session end itself stops it: the cache is cleared and nothing is sent.
+    // The session end itself stops retries: the cache is cleared and nothing is sent.
     test('does not retry refresh after the session ended', async () => {
       attachController(EXPIRED_TOKENS);
       mockAuthApi.refreshToken.mockRejectedValue(AUTH_FAILURE());

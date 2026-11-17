@@ -179,7 +179,7 @@ export class AuthService {
   private emailChallenges = new Map<string, EmailChallenge>();
 
   /**
-   * The one place this instance sends `/auth/refresh` (PFL-792). Every refresh path asks it: the
+   * The one place this instance sends `/auth/refresh`. Every refresh path asks it: the
    * explicit `refreshToken()`, the upgrade commit, `getTokens(true)`/`session()` and, once
    * `Passflow` attaches it, `TokenCacheService.getTokensWithRefresh()`.
    */
@@ -1157,7 +1157,7 @@ export class AuthService {
   }
 
   /**
-   * Signs this tab out under the refresh lock (PFL-792 §2.8): stops this tab's refresh callers and
+   * Signs this tab out under the refresh lock: stops this tab's refresh callers and
    * retry timer, waits at most 5 s for the lock (a request already in flight lands first), posts
    * `signed-out` to the other tabs, calls the logout API with the NEWEST stored refresh token (best
    * effort), then deletes the stored tokens, id token and CSRF token and clears the token cache.
@@ -1179,7 +1179,7 @@ export class AuthService {
   }
 
   /**
-   * `Passflow.reset()` (PFL-792 amendment A2): the same local sign-out, synchronously, with no
+   * `Passflow.reset()`: the same local sign-out, synchronously, with no
    * API call and no lock. Emits no `SignOut`; the caller emits one.
    *
    * @returns the `sub` of the session that ended, when known
@@ -1431,7 +1431,7 @@ export class AuthService {
    *
    * Both go through the refresh controller, the one place this instance sends `/auth/refresh`: it
    * coordinates with other tabs, saves with a compare-and-set, classifies failures and emits the
-   * events (PFL-792). A plain refresh is "fresh": it is satisfied only by tokens from a request
+   * events. A plain refresh is "fresh": it is satisfied only by tokens from a request
    * sent at or after the call. A failure keeps the tokens unless it really ends the session.
    *
    * The upgrade commit is the one path that is never classified: any failure rejects with the

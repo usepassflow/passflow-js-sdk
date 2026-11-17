@@ -29,7 +29,7 @@ export const refreshConfig: PassflowConfig = { refreshCoordination: 'web-locks',
 export const refreshError: PassflowRefreshError = new PassflowRefreshError(RefreshErrorId.disposed);
 export const dispose: () => void = () => pf.dispose();
 
-// Email verification code step (PFL-724).
+// Email verification code step.
 declare const answer: PassflowAuthorizationResponse;
 export const step: PassflowEmailVerificationStep | undefined = isEmailVerificationStep(answer) ? answer : undefined;
 export const emailOp: PassflowEmailVerificationOperation = 'reset-password';
@@ -37,7 +37,7 @@ export const emailEv: PassflowEvent = PassflowEvent.EmailVerificationRequired;
 export const codePayload: PassflowEmailCodePayload = { challenge_id: 'c', otp: '123456' };
 export const verified: Promise<PassflowAuthorizationResponse> = pf.verifyEmailCode(codePayload);
 
-// Admin settings secrets (PFL-770).
+// Admin settings secrets.
 export const secretNames: readonly AppSecretName[] = APP_SECRET_NAMES;
 export const masked: MaskedSecret = 'mask://********/0123456789abcdef';
 export const isMasked: boolean = isMaskedSecret(masked);

@@ -2,9 +2,9 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { AssuranceBar } from '../../lib/upgrade/challenge';
 import type { UpgradeFlightSummary } from '../../lib/upgrade/controller';
-import { barMeets, mergeChallenges, UpgradeController } from '../../lib/upgrade/controller';
-import { isUpgradeInsufficient } from '../../lib/upgrade/core';
-import { UpgradeTransportError } from '../../lib/upgrade/errors';
+import { barMeets, mergeChallenges, UpgradeController, UpgradeUnsatisfiableError } from '../../lib/upgrade/controller';
+import { isUpgradeInsufficient, isUpgradeTransportFailure, isUpgradeUnsatisfiable } from '../../lib/upgrade/core';
+import { classifyUpgradeError, UpgradeInsufficientError, UpgradeTransportError } from '../../lib/upgrade/errors';
 import { createUpgradeFacade } from '../../lib/upgrade/facade';
 import { upgradeFetch } from '../../lib/upgrade/fetch-adapter';
 import { createMockPlatform } from '../helpers/mock-platform';
@@ -55,6 +55,97 @@ describe("the server's available_factors at step-up", () => {
     expect(driver.requests[0]!.factors.map((factor) => factor.type)).toEqual(['totp', 'recovery_codes']);
     driver.cancel(0);
     await pending.catch(() => undefined);
+  });
+
+  test('an empty list opens no prompt, sends the request once and settles as unsatisfiable', async () => {
+    const f = fixture();
+    let sent = 0;
+    const wrapped = upgradeFetch(
+      async () => {
+        sent++;
+        return new Response(JSON.stringify({ error: 'upgrade_required', acr_values: '2', available_factors: [] }), {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+      options({ elevate: (c, w) => f.controller.elevate(c, w) }),
+    );
+
+    const settled = await wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+
+    expect(f.driver.requests).toHaveLength(0);
+    expect(sent).toBe(1);
+    expect(settled instanceof Response ? isUpgradeUnsatisfiable(settled) : settled instanceof UpgradeUnsatisfiableError).toBe(
+      true,
+    );
+    await vi.waitFor(() => expect(f.controller.currentState).toBe('idle'));
+    expect(f.summaries).toHaveLength(1);
+  });
+
+  test('a factor that passes, then the same 403 again, stops as insufficient with no second prompt or replay', async () => {
+    const f = fixture();
+    let sent = 0;
+    const wrapped = upgradeFetch(
+      async () => {
+        sent++;
+        return challengeResponse(403);
+      },
+      options({ elevate: (c, w) => f.controller.elevate(c, w), readObtainedBar: () => ({ level: 2, acrValues: '2' }) }),
+    );
+
+    const result = wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+    await vi.waitFor(() => expect(f.driver.requests).toHaveLength(1));
+    f.driver.select(0, 'totp');
+    f.driver.submit(0, 'totp');
+    const settled = await result;
+
+    expect(f.commits).toHaveLength(1);
+    expect(sent).toBe(2);
+    expect(f.driver.requests).toHaveLength(1);
+    expect(settled instanceof Response ? isUpgradeInsufficient(settled) : settled instanceof UpgradeInsufficientError).toBe(
+      true,
+    );
+  });
+
+  test('a 429 on the step-up commit reaches the caller as an error, with no second prompt or retry', async () => {
+    const driver = promptDriver();
+    let commits = 0;
+    const controller = new UpgradeController({
+      platform: createMockPlatform(),
+      prompt: driver.prompt,
+      transport: {
+        prepare: async () => undefined,
+        commit: async () => {
+          commits++;
+          // What the SDK's transport throws for a 429 on the commit round.
+          throw classifyUpgradeError(
+            Object.assign(new Error('Too Many Requests'), { response: { status: 429, data: {} } }),
+            'refresh',
+          );
+        },
+      },
+      readObtainedBar: () => ({ level: 2, acrValues: '2' }),
+    });
+    let sent = 0;
+    const wrapped = upgradeFetch(
+      async () => {
+        sent++;
+        return challengeResponse(403);
+      },
+      options({ elevate: (c, w) => controller.elevate(c, w) }),
+    );
+
+    const result = wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+    await vi.waitFor(() => expect(driver.requests).toHaveLength(1));
+    driver.select(0, 'totp');
+    driver.submit(0, 'totp');
+    const settled = await result;
+
+    expect(commits).toBe(1);
+    expect(sent).toBe(1);
+    expect(driver.requests).toHaveLength(1);
+    expect(settled instanceof Response ? isUpgradeTransportFailure(settled) : settled instanceof Error).toBe(true);
+    await vi.waitFor(() => expect(controller.currentState).toBe('idle'));
   });
 
   test("a stronger join keeps the server's list", () => {

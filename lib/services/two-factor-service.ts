@@ -6,7 +6,7 @@ import {
   TwoFactorCompletionOptions,
   TwoFactorConfirmResponse,
   TwoFactorDisableResponse,
-  TwoFactorEnrollment,
+  TwoFactorEnrollmentResponse,
   TwoFactorMethod,
   TwoFactorRecoveryResponse,
   TwoFactorRegenerateResponse,
@@ -70,9 +70,9 @@ export class TwoFactorService {
   private readonly PARTIAL_AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes timeout
   private readonly SESSION_STORAGE_KEY = 'passflow_2fa_challenge';
 
-  // TOTP digit configuration (6 or 8 digits)
-  // This field is used throughout the service for TOTP validation and API responses
-  private totpDigits: 6 | 8 = 6; // Default to 6 for backward compatibility
+  // Digits in the user's TOTP code, from the last server answer that carried them.
+  // Undefined until then; cleared with the pending sign-in.
+  private totpDigits?: 6 | 8;
 
   // Magic link session storage (in-memory only for security - no persistence)
   private magicLinkSession?: TwoFactorSetupMagicLinkSession;
@@ -129,10 +129,7 @@ export class TwoFactorService {
   async getStatus(): Promise<TwoFactorStatusResponse> {
     try {
       const response = await this.twoFactorApi.getStatus(this.getMagicLinkSessionToken() ?? undefined);
-      // Store totp_digits from backend response
-      if (response.totp_digits) {
-        this.totpDigits = response.totp_digits;
-      }
+      this.storeTotpDigits(response.totp_digits);
       return response;
     } catch (error) {
       this.emitErrorAndThrow(error, '2fa.status', 'Get 2FA status');
@@ -174,10 +171,13 @@ export class TwoFactorService {
   /**
    * What the sign-in waiting on its second factor can do next. Read this before asking for a code:
    * the server decides, and only `verify` means the user has a factor to enter a code from.
+   * With a TOTP enrolment the answer carries `totp_digits`, which `verify` then expects.
    */
-  async getEnrollment(): Promise<TwoFactorEnrollment> {
+  async getEnrollment(): Promise<TwoFactorEnrollmentResponse> {
     try {
-      return await this.twoFactorApi.getEnrollment(this.requirePendingTfaToken());
+      const response = await this.twoFactorApi.getEnrollment(this.requirePendingTfaToken());
+      this.storeTotpDigits(response.totp_digits);
+      return response;
     } catch (error) {
       this.emitErrorAndThrow(error, '2fa.enrollment.read', 'Read 2FA enrollment');
     }
@@ -219,9 +219,18 @@ export class TwoFactorService {
     }
   }
 
+  /**
+   * Refuses a code of the wrong shape before any request: exactly the known digit count, or
+   * 6 or 8 digits while the count is unknown (the server then decides).
+   */
   private assertTotpCode(code: string): void {
-    if (!isValidTOTPCode(code, this.totpDigits)) {
-      throw new Error(`Invalid TOTP code format. Code must be exactly ${this.totpDigits} digits.`);
+    const digits = this.totpDigits;
+    if (digits) {
+      if (!isValidTOTPCode(code, digits)) {
+        throw new Error(`Invalid TOTP code format. Code must be exactly ${digits} digits.`);
+      }
+    } else if (!isValidTOTPCode(code, 6) && !isValidTOTPCode(code, 8)) {
+      throw new Error('Invalid TOTP code format. Code must be 6 or 8 digits.');
     }
   }
 
@@ -233,11 +242,15 @@ export class TwoFactorService {
     return tfaToken;
   }
 
-  private setupStarted(response: TwoFactorSetupResponse): TwoFactorSetupResponse {
-    // Store totp_digits from backend response
-    if (response.totp_digits) {
-      this.totpDigits = response.totp_digits;
+  /** Keeps the TOTP digit count the server sent; an answer without one leaves it unchanged. */
+  private storeTotpDigits(digits: 6 | 8 | undefined): void {
+    if (digits) {
+      this.totpDigits = digits;
     }
+  }
+
+  private setupStarted(response: TwoFactorSetupResponse): TwoFactorSetupResponse {
+    this.storeTotpDigits(response.totp_digits);
     this.subscribeStore.notify(PassflowEvent.TwoFactorSetupStarted, { secret: response.secret });
     return response;
   }
@@ -265,10 +278,7 @@ export class TwoFactorService {
    * @param options.trustDevice - ask the server to trust this device for later sign-ins
    */
   async verify(code: string, options?: TwoFactorCompletionOptions): Promise<TwoFactorVerifyResponse> {
-    // Validate TOTP code format with configured digits
-    if (!isValidTOTPCode(code, this.totpDigits)) {
-      throw new Error(`Invalid TOTP code format. Code must be exactly ${this.totpDigits} digits.`);
-    }
+    this.assertTotpCode(code);
 
     // Attempt to recover partial auth state from sessionStorage
     this.recoverPartialAuthState();
@@ -310,7 +320,7 @@ export class TwoFactorService {
       // Normalize and validate recovery code format
       const normalizedCode = normalizeRecoveryCode(code);
       if (!normalizedCode) {
-        throw new Error('Invalid recovery code format. Expected format: XXXX-XXXX or XXXXXXXX (alphanumeric).');
+        throw new Error('Invalid recovery code format. Expected format: XXXX-XXXX-XXXX (letters and digits).');
       }
 
       // Attempt to recover partial auth state from sessionStorage
@@ -333,13 +343,14 @@ export class TwoFactorService {
         }),
       );
 
-      // Check for recovery codes exhaustion
-      if (response.remaining_recovery_codes === 0) {
+      // The low and exhausted warnings need the count, which the server may leave out
+      const remaining = response.remaining_recovery_codes;
+      if (remaining === 0) {
         this.subscribeStore.notify(PassflowEvent.TwoFactorRecoveryCodesExhausted, { tokens: response });
-      } else if (response.remaining_recovery_codes <= 2) {
+      } else if (typeof remaining === 'number' && remaining <= 2) {
         this.subscribeStore.notify(PassflowEvent.TwoFactorRecoveryCodesLow, {
           tokens: response,
-          remainingCodes: response.remaining_recovery_codes,
+          remainingCodes: remaining,
         });
       }
 
@@ -360,10 +371,7 @@ export class TwoFactorService {
    * Disable 2FA (requires TOTP verification)
    */
   async disable(code: string): Promise<TwoFactorDisableResponse> {
-    // Validate TOTP code format with configured digits
-    if (!isValidTOTPCode(code, this.totpDigits)) {
-      throw new Error(`Invalid TOTP code format. Code must be exactly ${this.totpDigits} digits.`);
-    }
+    this.assertTotpCode(code);
 
     try {
       const response = await this.twoFactorApi.disable({ code });
@@ -378,10 +386,7 @@ export class TwoFactorService {
    * Regenerate recovery codes
    */
   async regenerateRecoveryCodes(code: string): Promise<TwoFactorRegenerateResponse> {
-    // Validate TOTP code format with configured digits
-    if (!isValidTOTPCode(code, this.totpDigits)) {
-      throw new Error(`Invalid TOTP code format. Code must be exactly ${this.totpDigits} digits.`);
-    }
+    this.assertTotpCode(code);
 
     try {
       const response = await this.twoFactorApi.regenerateRecoveryCodes({ code });
@@ -461,6 +466,7 @@ export class TwoFactorService {
    */
   clearPartialAuthState(): void {
     this.partialAuthState = undefined;
+    this.totpDigits = undefined;
     this.signInCompleter?.forgetPkceSignIn();
     if (typeof sessionStorage !== 'undefined') {
       try {
@@ -636,11 +642,11 @@ export class TwoFactorService {
 
   /**
    * Get configured TOTP digit count
-   * Returns the number of digits (6 or 8) for TOTP codes
+   * Returns the number of digits (6 or 8) for TOTP codes; 6 until a server answer gives the count
    * Useful for UI components that need to render the correct number of input fields
    */
   getTotpDigits(): 6 | 8 {
-    return this.totpDigits;
+    return this.totpDigits ?? 6;
   }
 
   // ============================================
@@ -717,10 +723,11 @@ export class TwoFactorService {
   async requestChallenge(payload: TwoFactorChallengeRequest): Promise<TwoFactorChallengeResponse> {
     try {
       const response = await this.twoFactorApi.requestChallenge(payload, this.pendingTfaToken());
+      this.storeTotpDigits(response.totp_digits);
       this.subscribeStore.notify(PassflowEvent.TwoFactorChallengeReceived, {
         challengeId: response.challenge_id,
         method: response.method,
-        alternativeMethods: response.alternative_methods,
+        alternativeMethods: response.alternative_methods ?? [],
       });
       return response;
     } catch (error) {
@@ -735,9 +742,6 @@ export class TwoFactorService {
   async verifyV2(payload: TwoFactorVerifyRequestV2): Promise<TwoFactorVerifyResponseV2> {
     try {
       const response = await this.twoFactorApi.verifyV2(payload, this.pendingTfaToken());
-      if (!response.success) {
-        return response;
-      }
       const completed = await this.finishSignIn(response);
       this.subscribeStore.notify(PassflowEvent.TwoFactorVerified, {
         tokens: {
@@ -745,9 +749,6 @@ export class TwoFactorService {
           refresh_token: completed.refresh_token,
         },
       });
-      if (completed.device_trusted) {
-        this.subscribeStore.notify(PassflowEvent.TwoFactorDeviceTrusted, {});
-      }
       return completed;
     } catch (error) {
       this.emitErrorAndThrow(error, '2fa.challenge.verify', 'Verify 2FA challenge');
@@ -760,10 +761,11 @@ export class TwoFactorService {
   async switchToAlternative(payload: TwoFactorAlternativeRequest): Promise<TwoFactorChallengeResponse> {
     try {
       const response = await this.twoFactorApi.switchToAlternative(payload, this.pendingTfaToken());
+      this.storeTotpDigits(response.totp_digits);
       this.subscribeStore.notify(PassflowEvent.TwoFactorMethodSwitched, {
         challengeId: response.challenge_id,
         method: response.method,
-        alternativeMethods: response.alternative_methods,
+        alternativeMethods: response.alternative_methods ?? [],
       });
       return response;
     } catch (error) {

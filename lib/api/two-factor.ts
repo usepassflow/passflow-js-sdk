@@ -16,7 +16,6 @@ import {
   TwoFactorConfirmResponse,
   TwoFactorDisableRequest,
   TwoFactorDisableResponse,
-  TwoFactorEnrollment,
   TwoFactorEnrollmentResponse,
   TwoFactorMethod,
   TwoFactorRecoveryRequest,
@@ -35,6 +34,12 @@ import {
   TwoFactorVerifyResponse,
   TwoFactorVerifyResponseV2,
 } from './model';
+
+/** GET /v2/user/2fa/methods/available */
+type AvailableMethodsResponse = { available_methods?: TwoFactorMethod[] };
+
+/** GET /v2/user/2fa/methods */
+type RegisteredMethodsResponse = { registered_methods?: RegisteredTwoFactorMethod[]; total_count?: number };
 
 /** The 2FA token as the Bearer credential, or no config when there is none. */
 const bearer = (tfaToken?: string): AxiosRequestConfig =>
@@ -144,12 +149,11 @@ export class TwoFactorApiClient {
    * What a sign-in waiting on its second factor can do next
    * GET /auth/2fa/enrollment
    */
-  async getEnrollment(tfaToken: string): Promise<TwoFactorEnrollment> {
-    const response = await this.axiosClient.get<TwoFactorEnrollmentResponse>(
+  getEnrollment(tfaToken: string): Promise<TwoFactorEnrollmentResponse> {
+    return this.axiosClient.get<TwoFactorEnrollmentResponse>(
       PassflowEndpointPaths.twoFactorEnrollment,
       withOwnBearer(tfaToken),
     );
-    return response.enrollment;
   }
 
   /**
@@ -376,16 +380,18 @@ export class TwoFactorApiClient {
    * Get available 2FA methods for current user
    * GET /v2/user/2fa/methods/available
    */
-  getAvailableMethods(): Promise<TwoFactorMethod[]> {
-    return this.axiosClient.get<TwoFactorMethod[]>(PassflowEndpointPaths.TwoFactorMethodsAvailable);
+  async getAvailableMethods(): Promise<TwoFactorMethod[]> {
+    const response = await this.axiosClient.get<AvailableMethodsResponse>(PassflowEndpointPaths.TwoFactorMethodsAvailable);
+    return response?.available_methods ?? [];
   }
 
   /**
    * Get registered 2FA methods for current user
    * GET /v2/user/2fa/methods
    */
-  getRegisteredMethods(): Promise<RegisteredTwoFactorMethod[]> {
-    return this.axiosClient.get<RegisteredTwoFactorMethod[]>(PassflowEndpointPaths.TwoFactorMethodsRegistered);
+  async getRegisteredMethods(): Promise<RegisteredTwoFactorMethod[]> {
+    const response = await this.axiosClient.get<RegisteredMethodsResponse>(PassflowEndpointPaths.TwoFactorMethodsRegistered);
+    return response?.registered_methods ?? [];
   }
 
   /**

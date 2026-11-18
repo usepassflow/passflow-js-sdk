@@ -3,7 +3,6 @@ import { PassflowError } from '../../lib/api';
 import {
   TwoFactorConfirmResponse,
   TwoFactorDisableResponse,
-  TwoFactorPolicy,
   TwoFactorRecoveryResponse,
   TwoFactorRegenerateResponse,
   TwoFactorSetupResponse,
@@ -130,7 +129,7 @@ describe('TwoFactorService', () => {
       store.subscribe({ onAuthChange: (event, payload) => events.push({ event, payload }) });
 
       const authApi = {
-        signIn: vi.fn().mockResolvedValue({ tfa_token: TFA_TOKEN, requires_2fa: true }),
+        signIn: vi.fn().mockResolvedValue({ tfa_token: TFA_TOKEN }),
         pkceExchange: vi.fn().mockResolvedValue({ ...VALID_TOKENS }),
       };
       const twoFactorApi = {
@@ -195,7 +194,7 @@ describe('TwoFactorService', () => {
       expect(verified(events)).toEqual([
         { tokens: { access_token: VALID_TOKENS.access_token, refresh_token: VALID_TOKENS.refresh_token } },
       ]);
-      expect(events.map((e) => e.event)).toContain(PassflowEvent.TwoFactorDeviceTrusted);
+      expect(events.map((e) => e.event)).not.toContain(PassflowEvent.TwoFactorDeviceTrusted);
     });
 
     test('verify exchanges the code the same way', async () => {
@@ -216,7 +215,7 @@ describe('TwoFactorService', () => {
     test('useRecoveryCode exchanges the code the same way', async () => {
       const { authApi, service, storage } = await pkceSignIn();
 
-      const result = await service.useRecoveryCode('ABCD-1234');
+      const result = await service.useRecoveryCode('ABCD-EFGH-JKMN');
 
       expect(authApi.pkceExchange).toHaveBeenCalledTimes(1);
       expect(result).not.toHaveProperty('code');
@@ -248,6 +247,38 @@ describe('TwoFactorService', () => {
         expect.objectContaining({ code: 'PKCE_VERIFIER_MISSING' }),
       ]);
     });
+
+    // REGRESSION: a v2 verify answered with a code and no success field completes the sign-in
+    test('verifyV2 answered with a bare code still exchanges it and completes the session', async () => {
+      const { authApi, twoFactorApi, service, storage, events } = await pkceSignIn();
+      twoFactorApi.verifyV2.mockResolvedValue({ code: CODE });
+
+      const result = await service.verifyV2({ challenge_id: 'c', method: 'totp', response: '123456' });
+
+      expect(authApi.pkceExchange).toHaveBeenCalledTimes(1);
+      expect(result.access_token).toBe(VALID_TOKENS.access_token);
+      expect(storage.getTokens()?.access_token).toBe(VALID_TOKENS.access_token);
+      expect(service.isVerificationRequired()).toBe(false);
+      expect(verified(events)).toHaveLength(1);
+    });
+
+    // REGRESSION: a v2 verify answered with tokens and no success field completes the sign-in
+    test('verifyV2 answered with bare tokens applies them and completes the session', async () => {
+      const { twoFactorApi, service, storage, events } = await pkceSignIn({ pkceEnabled: false });
+      twoFactorApi.verifyV2.mockResolvedValue({
+        access_token: VALID_TOKENS.access_token,
+        refresh_token: VALID_TOKENS.refresh_token,
+      });
+
+      const result = await service.verifyV2({ challenge_id: 'c', method: 'totp', response: '123456' });
+
+      expect(result.access_token).toBe(VALID_TOKENS.access_token);
+      expect(storage.getTokens()?.access_token).toBe(VALID_TOKENS.access_token);
+      expect(service.isVerificationRequired()).toBe(false);
+      expect(verified(events)).toEqual([
+        { tokens: { access_token: VALID_TOKENS.access_token, refresh_token: VALID_TOKENS.refresh_token } },
+      ]);
+    });
   });
 
   // ===================================
@@ -259,7 +290,6 @@ describe('TwoFactorService', () => {
       // Given: User is authenticated, 2FA is not enabled
       const mockResponse: TwoFactorStatusResponse = {
         enabled: false,
-        policy: TwoFactorPolicy.Optional,
         recovery_codes_remaining: 0,
       };
       mockTwoFactorApi.getStatus.mockResolvedValue(mockResponse);
@@ -270,7 +300,6 @@ describe('TwoFactorService', () => {
       // Then: Returns correct status
       expect(result).toEqual(mockResponse);
       expect(result.enabled).toBe(false);
-      expect(result.policy).toBe(TwoFactorPolicy.Optional);
       expect(result.recovery_codes_remaining).toBe(0);
       expect(mockTwoFactorApi.getStatus).toHaveBeenCalledTimes(1);
     });
@@ -279,7 +308,6 @@ describe('TwoFactorService', () => {
       // Given: User is authenticated, 2FA is enabled with 8 recovery codes
       const mockResponse: TwoFactorStatusResponse = {
         enabled: true,
-        policy: TwoFactorPolicy.Optional,
         recovery_codes_remaining: 8,
       };
       mockTwoFactorApi.getStatus.mockResolvedValue(mockResponse);
@@ -369,7 +397,7 @@ describe('TwoFactorService', () => {
     test('TEST-6: Confirm 2FA setup with valid code', async () => {
       // Given: User has started setup, enters valid 6-digit TOTP code
       const mockResponse: TwoFactorConfirmResponse = {
-        success: true,
+        enabled: true,
         recovery_codes: ['ABCD-1234', 'EFGH-5678', 'IJKL-9012'],
       };
       mockTwoFactorApi.confirmSetup.mockResolvedValue(mockResponse);
@@ -379,7 +407,7 @@ describe('TwoFactorService', () => {
 
       // Then: Returns recovery codes and emits event
       expect(result).toEqual(mockResponse);
-      expect(result.success).toBe(true);
+      expect(result.enabled).toBe(true);
       expect(result.recovery_codes).toHaveLength(3);
       expect(mockTwoFactorApi.confirmSetup).toHaveBeenCalledWith({ code: '123456' }, undefined);
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(
@@ -436,7 +464,7 @@ describe('TwoFactorService', () => {
     test('TEST-9: 2fa:enabled event provides cleanup callback', async () => {
       // Given: Setup is confirmed successfully
       const mockResponse: TwoFactorConfirmResponse = {
-        success: true,
+        enabled: true,
         recovery_codes: ['ABCD-1234', 'EFGH-5678'],
       };
       mockTwoFactorApi.confirmSetup.mockResolvedValue(mockResponse);
@@ -592,13 +620,13 @@ describe('TwoFactorService', () => {
       mockTwoFactorApi.useRecoveryCode.mockResolvedValue(mockResponse);
 
       // When: useRecoveryCode() is called
-      const result = await twoFactorService.useRecoveryCode('ABCD-1234');
+      const result = await twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN');
 
       // Then: Returns tokens with remaining codes, emits events
       expect(result).toEqual(mockResponse);
       expect(result.remaining_recovery_codes).toBe(7);
       expect(mockTwoFactorApi.useRecoveryCode).toHaveBeenCalledWith({
-        recovery_code: 'ABCD-1234',
+        recovery_code: 'ABCD-EFGH-JKMN',
         tfa_token: 'tfa-token-123',
       });
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(
@@ -623,7 +651,7 @@ describe('TwoFactorService', () => {
       mockTwoFactorApi.useRecoveryCode.mockResolvedValue(mockResponse);
 
       // When: useRecoveryCode() is called
-      await twoFactorService.useRecoveryCode('ABCD-1234');
+      await twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN');
 
       // Then: Emits low recovery codes warning
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(
@@ -647,7 +675,7 @@ describe('TwoFactorService', () => {
       mockTwoFactorApi.useRecoveryCode.mockResolvedValue(mockResponse);
 
       // When: useRecoveryCode() is called
-      await twoFactorService.useRecoveryCode('ABCD-1234');
+      await twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN');
 
       // Then: Emits exhaustion event
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(
@@ -672,7 +700,7 @@ describe('TwoFactorService', () => {
       mockTwoFactorApi.useRecoveryCode.mockRejectedValue(error);
 
       // When/Then: API returns 400 Bad Request
-      await expect(twoFactorService.useRecoveryCode('INVALID')).rejects.toThrow();
+      await expect(twoFactorService.useRecoveryCode('ZZZZ-ZZZZ-ZZZZ')).rejects.toThrow();
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(
         PassflowEvent.Error,
         expect.objectContaining({
@@ -685,7 +713,7 @@ describe('TwoFactorService', () => {
       // Given: No partial auth state is set
 
       // When/Then: Throws error
-      await expect(twoFactorService.useRecoveryCode('ABCD-1234')).rejects.toThrow(
+      await expect(twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN')).rejects.toThrow(
         '2FA verification expired or not required. User must sign in first.',
       );
       expect(mockTwoFactorApi.useRecoveryCode).not.toHaveBeenCalled();
@@ -704,11 +732,46 @@ describe('TwoFactorService', () => {
       mockTwoFactorApi.useRecoveryCode.mockResolvedValue(mockResponse);
 
       // When: useRecoveryCode() succeeds
-      await twoFactorService.useRecoveryCode('ABCD-1234');
+      await twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN');
 
       // Then: Partial auth state is cleared
       expect(twoFactorService.isVerificationRequired()).toBe(false);
       expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('passflow_2fa_challenge');
+    });
+
+    // REGRESSION: an answer without a remaining count raises no low or exhausted warning
+    test('an answer without remaining_recovery_codes emits neither low nor exhausted', async () => {
+      twoFactorService.setPartialAuthState('user@example.com', 'challenge-123', 'tfa-token-123');
+      mockTwoFactorApi.useRecoveryCode.mockResolvedValue({ access_token: 'mock-access-token', success: true });
+
+      await twoFactorService.useRecoveryCode('ABCD-EFGH-JKMN');
+
+      const emitted = mockSubscribeStore.notify.mock.calls.map((call) => call[0]);
+      expect(emitted).not.toContain(PassflowEvent.TwoFactorRecoveryCodesLow);
+      expect(emitted).not.toContain(PassflowEvent.TwoFactorRecoveryCodesExhausted);
+      expect(emitted).toContain(PassflowEvent.TwoFactorVerified);
+    });
+
+    // REGRESSION: a code shorter than the server's minimum is refused locally, naming the server format
+    test('a code with fewer than 10 characters is refused before any request', async () => {
+      twoFactorService.setPartialAuthState('user@example.com', 'challenge-123', 'tfa-token-123');
+      mockTwoFactorApi.useRecoveryCode.mockResolvedValue({ access_token: 'mock-access-token', success: true });
+
+      await expect(twoFactorService.useRecoveryCode('ABCD-1234')).rejects.toThrow('XXXX-XXXX-XXXX');
+      expect(mockTwoFactorApi.useRecoveryCode).not.toHaveBeenCalled();
+    });
+
+    // REGRESSION: a 16-character code with dashes reaches the server upper-cased
+    test('a long code with dashes is accepted and sent upper-cased', async () => {
+      twoFactorService.setPartialAuthState('user@example.com', 'challenge-123', 'tfa-token-123');
+      mockTwoFactorApi.useRecoveryCode.mockResolvedValue({ access_token: 'mock-access-token', success: true });
+
+      await twoFactorService.useRecoveryCode('abcd-efgh-jkmn-pqrs');
+
+      expect(mockTwoFactorApi.useRecoveryCode).toHaveBeenCalledWith({
+        recovery_code: 'ABCD-EFGH-JKMN-PQRS',
+        tfa_token: 'tfa-token-123',
+      });
     });
   });
 
@@ -720,7 +783,7 @@ describe('TwoFactorService', () => {
     test('TEST-22: Disable 2FA with valid code', async () => {
       // Given: User is authenticated, 2FA is enabled
       const mockResponse: TwoFactorDisableResponse = {
-        success: true,
+        disabled: true,
       };
       mockTwoFactorApi.disable.mockResolvedValue(mockResponse);
 
@@ -784,7 +847,6 @@ describe('TwoFactorService', () => {
     test('TEST-25: Regenerate recovery codes with valid code', async () => {
       // Given: User is authenticated, 2FA is enabled
       const mockResponse: TwoFactorRegenerateResponse = {
-        success: true,
         recovery_codes: ['NEW1-1111', 'NEW2-2222', 'NEW3-3333'],
       };
       mockTwoFactorApi.regenerateRecoveryCodes.mockResolvedValue(mockResponse);
@@ -1028,7 +1090,7 @@ describe('TwoFactorService', () => {
     test('TEST-37: Emit 2fa:enabled event on confirmSetup', async () => {
       // Given: User calls confirmSetup() with valid code
       const mockResponse: TwoFactorConfirmResponse = {
-        success: true,
+        enabled: true,
         recovery_codes: ['ABCD-1234', 'EFGH-5678'],
       };
       mockTwoFactorApi.confirmSetup.mockResolvedValue(mockResponse);
@@ -1065,7 +1127,7 @@ describe('TwoFactorService', () => {
     test('TEST-39: Emit 2fa:disabled event on disable', async () => {
       // Given: User calls disable() with valid code
       const mockResponse: TwoFactorDisableResponse = {
-        success: true,
+        disabled: true,
       };
       mockTwoFactorApi.disable.mockResolvedValue(mockResponse);
 

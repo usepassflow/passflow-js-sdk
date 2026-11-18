@@ -23,7 +23,7 @@ const BFF_CONFIG = {
 type Completion = 'verifyTwoFactor' | 'useTwoFactorRecoveryCode';
 
 const complete = (passflow: Passflow, method: Completion) =>
-  method === 'verifyTwoFactor' ? passflow.verifyTwoFactor('123456') : passflow.useTwoFactorRecoveryCode('ABCD-1234');
+  method === 'verifyTwoFactor' ? passflow.verifyTwoFactor('123456') : passflow.useTwoFactorRecoveryCode('ABCD-EFGH-JKMN');
 
 describe('second factor completion through Passflow', () => {
   let setItem: ReturnType<typeof vi.spyOn>;
@@ -115,6 +115,29 @@ describe('second factor completion through Passflow', () => {
     expect(stored()).not.toContain(VALID_ACCESS_TOKEN);
     expect(stored()).not.toContain(VALID_REFRESH_TOKEN);
     expect(fetchMock.mock.calls.filter(([url]) => url === CALLBACK_URL)).toHaveLength(1);
+  });
+
+  // REGRESSION: getTwoFactorEnrollment resolves to the whole answer, and its digit count sets the code length
+  test('getTwoFactorEnrollment returns the whole answer and an 8-digit code then reaches the server', async () => {
+    stubApis(false);
+    const passflow = new Passflow(TEST_CONFIG);
+    const enrollment = { enrollment: 'verify', totp_digits: 8, totp_period: 30 };
+    // The axios instance is private; only the enrolment read is answered over HTTP here.
+    (
+      passflow as unknown as { twoFactorApi: { axiosClient: { instance: { defaults: { adapter: unknown } } } } }
+    ).twoFactorApi.axiosClient.instance.defaults.adapter = async (config: { url?: string }) => ({
+      data: config.url === '/auth/2fa/enrollment' ? enrollment : {},
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    });
+    await passflow.signIn(CREDENTIALS);
+
+    await expect(passflow.getTwoFactorEnrollment()).resolves.toEqual(enrollment);
+    await passflow.verifyTwoFactor('12345678');
+
+    expect(verify).toHaveBeenCalledWith(expect.objectContaining({ code: '12345678' }));
   });
 
   describe('the PKCE verifier', () => {

@@ -368,12 +368,19 @@ export class AuthService {
     }
   }
 
+  /** A registration that leaves the user signed in: `Register`, then `SignIn` with the same payload. */
+  private notifyRegisteredAndSignedIn(tokens: PassflowAuthorizationResponse): void {
+    const payload = { tokens, parsedTokens: this.tokenCacheService.getParsedTokens() };
+    this.subscribeStore.notify(PassflowEvent.Register, payload);
+    this.subscribeStore.notify(PassflowEvent.SignIn, payload);
+  }
+
   /**
    * Reports whether a sign-in response is still waiting on its second factor,
    * and when it is, hands the 2FA token on.
    *
    * Every sign-in path can end this way: the server answers with a
-   * `tfa_token` (or `requires_2fa`) in place of tokens. That response is not
+   * `tfa_token` in place of tokens. That response is not
    * a session, so on `true` the caller returns it as it is — without
    * `processAuthResponse`, a `SignIn`/`Register` event or a session check.
    * The `TwoFactorRequired` event is what the TwoFactorService listens to, so
@@ -382,12 +389,12 @@ export class AuthService {
    * the verifier stays here for `completePkceSignIn`, off the public event.
    */
   private handlePendingSecondFactor(
-    response: Pick<PassflowAuthorizationResponse, 'requires_2fa' | 'challenge_id' | 'tfa_token'>,
+    response: Pick<PassflowAuthorizationResponse, 'challenge_id' | 'tfa_token'>,
     email?: string,
     pkce?: Pick<PkcePair, 'verifier'>,
     scopes?: string[],
   ): boolean {
-    if (response.requires_2fa !== true && !response.tfa_token) {
+    if (!response.tfa_token) {
       return false;
     }
     if (pkce) {
@@ -798,10 +805,7 @@ export class AuthService {
       }
 
       await this.processAuthResponse(response, payload.scopes);
-      this.subscribeStore.notify(PassflowEvent.Register, {
-        tokens: response,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      this.notifyRegisteredAndSignedIn(response);
       await this.submitSessionCheck();
       return response;
     } catch (error) {
@@ -1138,10 +1142,14 @@ export class AuthService {
       const response = answer.redirect_url ? { ...exchanged, redirect_url: answer.redirect_url } : exchanged;
       await this.processAuthResponse(response, scopes);
       this.forgetPkceSignIn();
-      this.subscribeStore.notify(challenge?.operation === 'sign-up' ? PassflowEvent.Register : PassflowEvent.SignIn, {
-        tokens: response,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      if (challenge?.operation === 'sign-up') {
+        this.notifyRegisteredAndSignedIn(response);
+      } else {
+        this.subscribeStore.notify(PassflowEvent.SignIn, {
+          tokens: response,
+          parsedTokens: this.tokenCacheService.getParsedTokens(),
+        });
+      }
       await this.submitSessionCheck();
       return response;
     } catch (error) {
@@ -1564,10 +1572,7 @@ export class AuthService {
       }
 
       await this.processAuthResponse(responseRegisterComplete, payload.scopes);
-      this.subscribeStore.notify(PassflowEvent.Register, {
-        tokens: responseRegisterComplete,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      this.notifyRegisteredAndSignedIn(responseRegisterComplete);
       await this.submitSessionCheck();
       return responseRegisterComplete;
     } catch (error) {

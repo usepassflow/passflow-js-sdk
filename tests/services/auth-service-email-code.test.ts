@@ -91,7 +91,9 @@ describe.each(flows)('email code steps from $operation', ({ operation, path, sta
     expect(result.access_token).toBe(VALID_TOKENS.access_token);
     expect(result).not.toHaveProperty('code');
     expect(h.sdk.getCachedTokens()?.access_token).toBe(VALID_TOKENS.access_token);
-    expect(h.names()).toEqual([operation === 'sign-up' ? PassflowEvent.Register : PassflowEvent.SignIn]);
+    expect(h.names()).toEqual(
+      operation === 'sign-up' ? [PassflowEvent.Register, PassflowEvent.SignIn] : [PassflowEvent.SignIn],
+    );
     expect(h.writes.map(({ value }) => value).join('\n')).not.toContain(OTP.otp);
     await h.sdk.refreshToken();
     expect(body(h.wire('/auth/refresh').at(-1)!).scopes).toEqual(scopes);
@@ -213,7 +215,7 @@ describe('verifyEmailCode completion', () => {
       expect(localStorage.getItem('access')).toBe(VALID_TOKENS.access_token);
       expect(h.sdk.isAuthenticated()).toBe(true);
       const terminal = origin === 'sign-up' ? PassflowEvent.Register : PassflowEvent.SignIn;
-      expect(h.names()).toEqual([terminal]);
+      expect(h.names()).toEqual(origin === 'sign-up' ? [PassflowEvent.Register, PassflowEvent.SignIn] : [terminal]);
       expect(h.of(terminal)).toEqual([
         expect.objectContaining({
           tokens: expect.objectContaining({ access_token: VALID_TOKENS.access_token }),
@@ -340,7 +342,7 @@ describe('verifyEmailCode completion', () => {
     h.validationError(undefined);
     h.clearEvents();
     await h.sdk.verifyEmailCode(OTP);
-    expect(h.names()).toEqual([PassflowEvent.Register]);
+    expect(h.names()).toEqual([PassflowEvent.Register, PassflowEvent.SignIn]);
   });
 
   test('TEST-18 REQ-15 forgets challenge origin after a successful 200', async () => {
@@ -348,7 +350,7 @@ describe('verifyEmailCode completion', () => {
     await h.start('sign-up');
     h.clearEvents();
     await h.sdk.verifyEmailCode(OTP);
-    expect(h.names()).toEqual([PassflowEvent.Register]);
+    expect(h.names()).toEqual([PassflowEvent.Register, PassflowEvent.SignIn]);
     h.clearEvents();
     await h.sdk.verifyEmailCode(OTP);
     expect(h.names()).toEqual([PassflowEvent.SignIn]);
@@ -365,7 +367,7 @@ describe('verifyEmailCode completion', () => {
     expect(h.names()).toEqual([PassflowEvent.SignIn]);
     h.clearEvents();
     await h.sdk.verifyEmailCode({ ...OTP, challenge_id: 'c10' });
-    expect(h.names()).toEqual([PassflowEvent.Register]);
+    expect(h.names()).toEqual([PassflowEvent.Register, PassflowEvent.SignIn]);
   });
 
   test('TEST-20 REQ-17 forgets sign-up origin on logOut', async () => {
@@ -410,10 +412,10 @@ describe('verifyEmailCode completion', () => {
     labelledError(h);
   });
 
-  test('TEST-29 REQ-11 treats requires_2fa alone as pending rather than a session', async () => {
+  test('TEST-29 REQ-11 treats a tfa_token as a pending sign-in rather than a session', async () => {
     const h = harness();
     await h.start('sign-in');
-    h.validateAnswer({ requires_2fa: true, challenge_id: 'second' });
+    h.validateAnswer({ tfa_token: 'second-factor-token' });
     h.clearEvents();
     await h.sdk.verifyEmailCode(OTP);
     expect(h.names()).toEqual([PassflowEvent.TwoFactorRequired]);

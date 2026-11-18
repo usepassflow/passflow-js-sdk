@@ -665,10 +665,12 @@ expired or spent code throws a `PassflowError` with an `error.otp.*` id, and an 
 throws `error.not.found`. To send a fresh code, call the original method again; the new step has a
 new `challenge_id`.
 
-- **Register or SignIn.** `verifyEmailCode` emits `Register` for a challenge this `Passflow`
-  instance got from `signUp`, and `SignIn` for one from `signIn` or `resetPassword`. Challenges are
-  remembered in memory only, so a code entered in another tab, after a reload, or on a recreated
-  instance emits `SignIn`, even for a sign-up. It emits no `SignInStart` or `RegisterStart`.
+- **Register or SignIn.** `verifyEmailCode` emits `Register` then `SignIn` for a challenge this
+  `Passflow` instance got from `signUp`, and `SignIn` alone for one from `signIn` or
+  `resetPassword`. Challenges are remembered in memory only, so a code entered in another tab, after
+  a reload, or on a recreated instance emits `SignIn` alone, even for a sign-up. `verifyEmailCode`
+  emits no `SignInStart` or `RegisterStart`. `signUp` and `passkeyRegister` that sign the user in at
+  once also emit `Register` then `SignIn`.
 - **No `challenge_id`.** The code budget is spent and the server emailed a link instead. There is
   nothing to call: show `message` and let the user follow the link.
 - **Password reset.** `resetPassword(newPassword, scopes?, resetToken?)` takes the reset token as
@@ -681,7 +683,8 @@ A `required` app answers every sign-in with a `tfa_token`, also for a user who h
 Ask the server what this sign-in can do next before asking for a code:
 
 ```typescript
-switch (await passflow.getTwoFactorEnrollment()) {
+const { enrollment } = await passflow.getTwoFactorEnrollment();
+switch (enrollment) {
   case "verify": // the user has a factor
     await passflow.verifyTwoFactor(code);
     break;
@@ -699,6 +702,14 @@ switch (await passflow.getTwoFactorEnrollment()) {
 }
 ```
 
+- **TOTP digits.** Read `getTwoFactorEnrollment()` before asking for the code. With a TOTP
+  enrolment it answers `totp_digits` (6 or 8) and `totp_period`, as does `requestChallenge`: size the
+  code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until
+  an answer gives the count, `verifyTwoFactor` accepts 6 or 8 digits and the server decides. The
+  count lasts one sign-in.
+- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). The SDK accepts at least 10
+  letters and digits, with or without dashes, and upper-cases them. `remaining_recovery_codes` may be
+  absent from the answer.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,
@@ -963,6 +974,13 @@ try {
   }
 }
 ```
+
+### Password change required
+
+A password sign-in for a user who must change the password first rejects with
+`PassflowPasswordChangeRequiredError` (a `PassflowError`, status 403, id
+`error.api.password.change.required`, exported as `PASSWORD_CHANGE_REQUIRED_ERROR_ID`). No token
+comes with it.
 
 ### Service unavailable
 

@@ -35,7 +35,7 @@ import {
   type TwoFactorCompletionOptions,
   type TwoFactorConfirmResponse,
   type TwoFactorDisableResponse,
-  type TwoFactorEnrollment,
+  type TwoFactorEnrollmentResponse,
   type TwoFactorRecoveryResponse,
   type TwoFactorRegenerateResponse,
   type TwoFactorSetupLinkResponse,
@@ -2154,12 +2154,14 @@ export class Passflow {
    * What the sign-in waiting on its second factor can do next. The server decides; read this
    * before asking for a code, and call `requestChallenge` only on `verify`.
    *
-   * @returns `verify`: ask for a code. `email_link`: `sendTwoFactorSetupLink`, then the user signs
-   * in again after enrolling. `direct`: `beginTwoFactorEnrollment`, `confirmTwoFactorEnrollment`,
-   * then `verifyTwoFactor`. `unavailable`: tell the user to contact the administrator.
+   * @returns The server's answer. Its `enrollment`: `verify`: ask for a code. `email_link`:
+   * `sendTwoFactorSetupLink`, then the user signs in again after enrolling. `direct`:
+   * `beginTwoFactorEnrollment`, `confirmTwoFactorEnrollment`, then `verifyTwoFactor`.
+   * `unavailable`: tell the user to contact the administrator. With a TOTP enrolment it also
+   * carries `totp_digits` (6 or 8) and `totp_period`; `verifyTwoFactor` then expects that many digits.
    * @throws {PassflowError} A 401 means the sign-in is over: sign in again.
    */
-  async getTwoFactorEnrollment(): Promise<TwoFactorEnrollment> {
+  async getTwoFactorEnrollment(): Promise<TwoFactorEnrollmentResponse> {
     try {
       return await this.twoFactorService.getEnrollment();
     } catch (error) {
@@ -2223,10 +2225,14 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * // After signIn returns requires_2fa: true
+   * // After signIn answers with a tfa_token
    * if (passflow.isTwoFactorVerificationRequired()) {
-   *   const response = await passflow.verifyTwoFactor('123456', { trustDevice: true });
-   *   console.log('Authentication complete', response.access_token);
+   *   const { enrollment, totp_digits = 6 } = await passflow.getTwoFactorEnrollment();
+   *   if (enrollment === 'verify') {
+   *     const code = await askForCode(totp_digits); // an input sized to the digit count
+   *     const response = await passflow.verifyTwoFactor(code, { trustDevice: true });
+   *     console.log('Authentication complete', response.access_token);
+   *   }
    * }
    * ```
    */
@@ -2257,10 +2263,12 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * // After signIn returns requires_2fa: true
-   * const result = await passflow.useTwoFactorRecoveryCode('ABCD-1234');
+   * // After signIn answers with a tfa_token
+   * const result = await passflow.useTwoFactorRecoveryCode('ABCD-EFGH-JKMN');
    * console.log('Authenticated with recovery code');
-   * console.log(`${result.remaining_recovery_codes} recovery codes remaining`);
+   * if (result.remaining_recovery_codes !== undefined) {
+   *   console.log(`${result.remaining_recovery_codes} recovery codes remaining`);
+   * }
    * ```
    */
   async useTwoFactorRecoveryCode(code: string, options?: TwoFactorCompletionOptions): Promise<TwoFactorRecoveryResponse> {

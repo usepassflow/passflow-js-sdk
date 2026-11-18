@@ -20,9 +20,11 @@ import { parseUpgradeChallenge } from '../upgrade/challenge';
 import { hasUpgradeTransactionMarker } from '../upgrade/markers';
 
 import {
+  PASSWORD_CHANGE_REQUIRED_ERROR_ID,
   PassflowConfig,
   PassflowEndpointPaths,
   PassflowError,
+  PassflowPasswordChangeRequiredError,
   PassflowResponseError,
   RequestMethod,
   RequestOptions,
@@ -505,6 +507,9 @@ export class AxiosClient {
     if ('error' in errorData && typeof errorData.error === 'object' && errorData.error !== null) {
       const { error } = errorData as PassflowResponseError;
 
+      if (error.id === PASSWORD_CHANGE_REQUIRED_ERROR_ID) {
+        return Promise.reject(new PassflowPasswordChangeRequiredError(error));
+      }
       return Promise.reject(new PassflowError(error));
     }
 

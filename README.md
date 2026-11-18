@@ -27,17 +27,28 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
   (`UpgradeChallenge.availableFactors?`); without the field it suggests TOTP before passkey.
 - A 429 on a step-up round is `UpgradeTransportError` kind `rate_limited` (it was `fatal`), with the
   server's message and `retryAfter` from `Retry-After`; the surfaces settle it as exhausted.
+- Response types that strict TypeScript code reads now say what the server may leave out. Handle
+  `undefined` for these, and stop checking `success` where it is gone:
+  - `AppSettings`: `secret`, `active`, `redirect_urls`, `origins`, `defaults`,
+    `custom_sms_messages`, `invite_only_registration`, `create_tenant_on_registration` and
+    `debug_otp_code_allowed` are optional.
+  - `TwoFactorVerifyResponseV2.success` is removed (a v2 verify that returns tokens succeeded).
+  - `success` on `TwoFactorVerifyResponse` and `TwoFactorRecoveryResponse` is optional.
+  - `RegisteredTwoFactorMethod.id`, `.name` and `.created_at`, and
+    `TwoFactorChallengeResponse.alternative_methods`, are optional.
+  - The `TwoFactorRecoveryUsed` event payload's `remainingCodes` is optional.
 
 **New:**
 - `UpgradeSignInRequiredError` (`upgrade_sign_in_required`) and `isUpgradeSignInRequired(res)`: the
-  step-up 403's `sign_in_required: true` (`prompt=login`, `max_age=0`; from older servers, an empty
-  `available_factors`) means only a fresh sign-in can meet it. No prompt opens; an open prompt is
+  step-up 403's `sign_in_required: true` (`prompt=login`, `max_age=0`, an expired `max_age` with no
+  factor to meet it; from older servers, an empty `available_factors`) means no step-up can meet it
+  and the user must sign in again. No prompt opens; an open prompt is
   closed through the new optional `onClosed`. An empty list with `sign_in_required: false` is
   `UpgradeUnsatisfiableError`: no factor of this account reaches the level.
 - `passflow.hostedUpgrade` refuses to re-prove a requirement it proved in the last 10 seconds (or
   within its `max_age`, if shorter) with `UpgradeInsufficientError`, so a refused proof cannot loop.
-  A sign-in or sign-out clears it. This relies on the server rejecting an elevation window under
-  10 seconds.
+  A sign-in or sign-out clears it. Keep every elevation window at 10 seconds or more (see Known
+  limits).
 - `PassflowPasswordChangeRequiredError` and `PASSWORD_CHANGE_REQUIRED_ERROR_ID` for a 403
   `error.api.password.change.required`.
 - `device_trust_available?` on the v2 challenge and the enrolment answer; `redirect_url?` and
@@ -48,11 +59,21 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
   on a fresh sign-in; the count resets with each new second-factor step.
 - `verifyV2` completes the sign-in (it waited for a `success` field the server never sends).
 - Recovery codes are checked only for their form; the server decides.
-- `PassflowError.name` is `'PassflowError'`. Fields `GET /app/settings` no longer sends are optional.
+- `PassflowError.name` is `'PassflowError'`.
 
-**Known limit:** a cookie or BFF session that stores no ID token makes another app's session
-undetectable, so this app's `logOut()` clears the shared delivery mode and session state. It fails
-safe: the other app is signed out, never wrongly signed in.
+**Known limits:**
+- The `hostedUpgrade` memory assumes the app's elevation window (`auth_assurance.elevation_max_age`)
+  is at least 10 seconds. Servers up to src/v0.49.1 accept any window; the next server release after
+  it refuses new windows under 10 seconds but keeps a shorter one already stored. With a window under
+  10 seconds, a re-challenge for the same requirement within 10 seconds of the proof is refused with
+  `UpgradeInsufficientError`, costing the user one extra sign-in. Keep every window at 10 seconds or
+  more, and re-save any shorter one.
+- A stale session (`max_age` expired) asked for a level none of the account's factors reaches gets
+  `sign_in_required: true` first. After the fresh sign-in, the level refusal follows as
+  `UpgradeUnsatisfiableError`, so that sign-in cannot help.
+- A cookie or BFF session that stores no ID token makes another app's session undetectable, so this
+  app's `logOut()` clears the shared delivery mode and session state. It fails safe: the other app is
+  signed out, never wrongly signed in.
 
 ### Version 0.30.1
 
@@ -785,7 +806,9 @@ switch (enrollment) {
   that order. Without it (older servers), TOTP is suggested before passkey. When the list is empty,
   no prompt opens and an open prompt is closed (its `onClosed` is called). The body's
   `sign_in_required` says why:
-  - `true`: only a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`). The step-up
+  - `true`: no step-up can meet the requirement, and the user must sign in again (`prompt=login`,
+    `max_age=0`, or an expired `max_age` with no factor to meet it). If the requested level is also
+    out of the account's reach, the next answer after that sign-in is the `false` case. The step-up
     rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
     true). Sign the user in again: an embedded app can call `authRedirect()`; the hosted login page
     shows its own sign-in form instead.
@@ -803,9 +826,11 @@ switch (enrollment) {
   stronger (a higher level or a shorter `max_age`) rejects with `UpgradeInsufficientError`, with no
   prompt and no request: the server refused a proof that met it, so prompting again would loop. Sign
   the user in again instead. The proof counts for 10 seconds from its commit request (or the
-  requirement's `max_age`, if shorter): after that the same requirement prompts again. This relies on
-  the server rejecting an elevation window under 10 seconds, so a lapsed elevation is never
-  refused. A sign-in or sign-out clears it.
+  requirement's `max_age`, if shorter): after that the same requirement prompts again. A sign-in or
+  sign-out clears it. Keep the app's elevation window (`auth_assurance.elevation_max_age`) at 10
+  seconds or more: a shorter window can lapse inside those 10 seconds, and the re-challenge is then
+  refused, costing one extra sign-in. The server release after src/v0.49.1 refuses new windows under
+  10 seconds; re-save any shorter one already stored.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,

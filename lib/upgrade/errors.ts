@@ -20,6 +20,8 @@ export type UpgradeErrorKind =
   | 'challenge_spent'
   /** The server's per-challenge attempt budget is burned. Stop; a fresh prepare will not help. */
   | 'exhausted'
+  /** The server's rate limit answered 429. Stop; try again after `retryAfter` seconds. */
+  | 'rate_limited'
   /**
    * The CONTROLLER's local attempt budget is burned: the user has answered
    * wrongly `maxAttempts` times and the elevation gives up.
@@ -126,6 +128,8 @@ export type UpgradeTransportErrorInit = {
   status?: number;
   /** The `PassflowError.id`, verbatim, when the server supplied one. */
   errorId?: string;
+  /** Seconds from the `Retry-After` header of a 429. */
+  retryAfter?: number;
   cause?: unknown;
 };
 
@@ -136,6 +140,7 @@ const DEFAULT_MESSAGES: Record<UpgradeErrorKind, string> = {
   wrong_code: 'That code was not accepted. Try again.',
   challenge_spent: 'That verification challenge is no longer valid. Start again.',
   exhausted: 'Too many attempts. Try again later.',
+  rate_limited: 'Too many requests. Try again later.',
   attempts_exhausted: 'Too many incorrect attempts. Verification was not completed.',
   not_registered: 'That verification method is not set up for this account.',
   prepare_not_required: 'This verification method needs no preparation round.',
@@ -160,6 +165,8 @@ export class UpgradeTransportError extends Error {
   readonly kind: UpgradeErrorKind;
   readonly status?: number;
   readonly errorId?: string;
+  /** Seconds to wait before trying again, from the `Retry-After` header of a 429. */
+  readonly retryAfter?: number;
   readonly retryable: boolean;
   /** Declared here rather than inherited: `Error.cause` is ES2022 and this build targets ES2021 libs. */
   readonly cause?: unknown;
@@ -169,6 +176,9 @@ export class UpgradeTransportError extends Error {
     this.kind = init.kind;
     this.status = init.status;
     this.errorId = init.errorId;
+    if (init.retryAfter !== undefined) {
+      this.retryAfter = init.retryAfter;
+    }
     this.retryable = isRetryableUpgradeKind(init.kind);
     if (init.cause !== undefined) {
       this.cause = init.cause;
@@ -215,7 +225,29 @@ export const isUpgradeTransportError = (e: unknown): e is UpgradeTransportError 
   e instanceof UpgradeTransportError ||
   (typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'upgrade_transport');
 
-type ErrorFacts = { status?: number; errorId?: string; message?: string; hasResponse: boolean };
+type ErrorFacts = {
+  status?: number;
+  errorId?: string;
+  message?: string;
+  hasResponse: boolean;
+  /** The plain-text `error` a body without the Passflow envelope carries (the rate limiter's 429). */
+  serverText?: string;
+  retryAfter?: number;
+};
+
+/** The `error` of a body that carries plain text there instead of the Passflow envelope. */
+const plainErrorText = (data: unknown): string | undefined => {
+  const text = (data as { error?: unknown } | undefined)?.error;
+  return typeof text === 'string' && text ? text : undefined;
+};
+
+/** `Retry-After` in seconds, when it is a non-negative integer. */
+const retryAfterSeconds = (headers: unknown): number | undefined => {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const raw = (headers as Record<string, unknown>)['retry-after'];
+  const seconds = typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : undefined;
+  return seconds;
+};
 
 /**
  * Pulls status, error id and message out of whatever the API layer rejected with.
@@ -233,7 +265,7 @@ const readErrorFacts = (e: unknown): ErrorFacts => {
     id?: unknown;
     status?: unknown;
     message?: unknown;
-    response?: { status?: unknown; data?: unknown };
+    response?: { status?: unknown; data?: unknown; headers?: unknown };
   };
 
   const response = candidate.response;
@@ -252,6 +284,8 @@ const readErrorFacts = (e: unknown): ErrorFacts => {
     errorId: typeof candidate.id === 'string' ? candidate.id : envelopeId,
     message: typeof candidate.message === 'string' ? candidate.message : undefined,
     hasResponse: response !== undefined || typeof candidate.status === 'number',
+    serverText: plainErrorText(response?.data),
+    retryAfter: retryAfterSeconds(response?.headers),
   };
 };
 
@@ -329,6 +363,9 @@ const kindFromStatus = (status: number | undefined, endpoint: UpgradeEndpoint): 
   if (status === 400) {
     return 'fatal';
   }
+  if (status === 429) {
+    return 'rate_limited';
+  }
   if (status === 401 || status === 403) {
     // On the prepare round an unrecognised 401 is the challenge going stale, and
     // a fresh prepare fixes it. On the commit round an unrecognised id is a
@@ -362,6 +399,18 @@ export const classifyUpgradeError = (e: unknown, endpoint: UpgradeEndpoint): Upg
   }
 
   const kind = kindFromErrorId(facts.errorId, endpoint) ?? kindFromStatus(facts.status, endpoint);
+
+  if (kind === 'rate_limited') {
+    // The limiter's body is `{ "error": "<text>" }`: that text, not axios' status line, is the message.
+    return new UpgradeTransportError({
+      kind,
+      message: facts.serverText,
+      status: facts.status,
+      errorId: facts.errorId,
+      retryAfter: facts.retryAfter,
+      cause: e,
+    });
+  }
 
   return new UpgradeTransportError({
     kind,

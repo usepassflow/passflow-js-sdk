@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { AssuranceBar } from '../../lib/upgrade/challenge';
 import type { UpgradeFlightSummary } from '../../lib/upgrade/controller';
 import { barMeets, mergeChallenges, UpgradeController, UpgradeUnsatisfiableError } from '../../lib/upgrade/controller';
-import { isUpgradeInsufficient, isUpgradeTransportFailure, isUpgradeUnsatisfiable } from '../../lib/upgrade/core';
+import { isUpgradeExhausted, isUpgradeInsufficient, isUpgradeUnsatisfiable } from '../../lib/upgrade/core';
 import { classifyUpgradeError, UpgradeInsufficientError, UpgradeTransportError } from '../../lib/upgrade/errors';
 import { createUpgradeFacade } from '../../lib/upgrade/facade';
 import { upgradeFetch } from '../../lib/upgrade/fetch-adapter';
@@ -144,7 +144,9 @@ describe("the server's available_factors at step-up", () => {
     expect(commits).toBe(1);
     expect(sent).toBe(1);
     expect(driver.requests).toHaveLength(1);
-    expect(settled instanceof Response ? isUpgradeTransportFailure(settled) : settled instanceof Error).toBe(true);
+    expect(
+      settled instanceof Response ? isUpgradeExhausted(settled) : (settled as UpgradeTransportError).kind === 'rate_limited',
+    ).toBe(true);
     await vi.waitFor(() => expect(controller.currentState).toBe('idle'));
   });
 

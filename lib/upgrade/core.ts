@@ -483,7 +483,8 @@ const classifyFailure = (e: unknown, obtained: AssuranceBar | undefined): CoreOu
     // server's own budget (`exhausted`) and the controller's local attempt
     // budget (`attempts_exhausted`) are the same statement to a caller — stop,
     // another answer will not help — and both are terminal.
-    if (e.kind === 'exhausted' || e.kind === 'attempts_exhausted') {
+    // A rate limit is the same statement too: stop, a retry now will not help.
+    if (e.kind === 'exhausted' || e.kind === 'attempts_exhausted' || e.kind === 'rate_limited') {
       return { kind: 'exhausted', error: e };
     }
     if (e.kind === 'unavailable') {

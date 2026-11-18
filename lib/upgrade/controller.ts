@@ -969,6 +969,7 @@ export class UpgradeController {
           return new UpgradeUnavailableError(e.message);
         case 'exhausted':
         case 'attempts_exhausted':
+        case 'rate_limited':
         case 'fatal':
         case 'protocol':
         case 'network':

@@ -1072,11 +1072,22 @@ export type TwoFactorSetupLinkResponse = {
   email_sent: boolean;
 };
 
-export type TwoFactorVerifyResponse = Tokens & {
-  success?: true;
-  /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
-  code?: string;
+/**
+ * How a sign-in under an OIDC parent (hosted login, `/oidc/authorize`) continues once its second
+ * factor is done: no tokens, the browser goes to `redirect_url` (the relying party's callback with
+ * its code), or posts `form_post` for `response_mode=form_post`.
+ */
+export type TwoFactorParentAnswer = {
+  redirect_url?: string;
+  form_post?: { action: string; fields: Record<string, string> };
 };
+
+export type TwoFactorVerifyResponse = Tokens &
+  TwoFactorParentAnswer & {
+    success?: true;
+    /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
+    code?: string;
+  };
 
 /**
  * Options for the call that completes a sign-in with its second factor.
@@ -1221,7 +1232,7 @@ export interface TwoFactorVerifyRequestV2 {
 /**
  * Verify Response from v2 2FA flow
  */
-export interface TwoFactorVerifyResponseV2 {
+export interface TwoFactorVerifyResponseV2 extends TwoFactorParentAnswer {
   access_token?: string;
   refresh_token?: string;
   id_token?: string;

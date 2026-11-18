@@ -6,6 +6,14 @@
  * leads. The first entry is the "suggested" method the UI renders immediately
  * — everything after it sits behind "use another way".
  *
+ * ## The server's list comes first
+ *
+ * When the challenge carries `availableFactors` (the step-up `403` body's
+ * `available_factors`), the server has said which factors this user can use and
+ * in what order: exactly those are offered, in that order, and the rest of this
+ * module does not apply. Everything below is the fallback for a server that
+ * does not send the list.
+ *
  * ## Rank, never filter
  *
  * It is tempting to drop factors that "cannot reach" the demanded level. The
@@ -39,10 +47,9 @@ const AAL3 = 3;
 /**
  * Ceremony preference among factors that are equally suitable, lowest first.
  *
- * Passkey leads because it is the cheapest ceremony for the user — one gesture,
- * nothing to read or type, nothing to mistype — and the strongest: it is the
- * only factor that can carry a session to AAL3 on its own, and the only one
- * that is phishing-resistant.
+ * TOTP leads because more users have it than a passkey: a suggested passkey the
+ * user has not registered is refused, pruned, and the user is asked again.
+ * An AAL3 challenge still puts the passkey first (see `rank`).
  *
  * Recovery codes sit last on purpose. They verify perfectly well, but each one
  * is single-use and the user's supply is finite and usually inconvenient to
@@ -50,8 +57,8 @@ const AAL3 = 3;
  * factor is available, so they are an escape hatch rather than a suggestion.
  */
 const CEREMONY_ORDER: Record<UpgradeFactorType, number> = {
-  passkey: 0,
-  totp: 1,
+  totp: 0,
+  passkey: 1,
   email_otp: 2,
   sms_otp: 3,
   recovery_codes: 9,
@@ -108,9 +115,12 @@ const rank = (factor: UpgradeFactor, demanded: number | undefined): number => {
  *                    enrolled credentials before calling, when known.
  * @param challenge - What the server demanded (`acrValues`, `maxAge`).
  * @returns The factors to offer, most-preferred first. Empty only when
- *          `available` was empty — this never drops a factor of its own accord.
+ *          `available` was empty, or the server's list names none of them.
  */
 export const selectFactors = (available: readonly UpgradeFactor[], challenge: UpgradeChallenge): readonly UpgradeFactor[] => {
+  if (challenge.availableFactors) {
+    return challenge.availableFactors.flatMap((type) => available.find((factor) => factor.type === type) ?? []);
+  }
   const demanded = requiredLevel(challenge);
   // Sort a copy: `available` may be the caller's registry, and a stable sort
   // keeps registration order as the tie-break for equally ranked factors.

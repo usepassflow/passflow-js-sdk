@@ -2,7 +2,7 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { AssuranceBar } from '../../lib/upgrade/challenge';
 import type { UpgradeFlightSummary } from '../../lib/upgrade/controller';
-import { barMeets, UpgradeController } from '../../lib/upgrade/controller';
+import { barMeets, mergeChallenges, UpgradeController } from '../../lib/upgrade/controller';
 import { isUpgradeInsufficient } from '../../lib/upgrade/core';
 import { UpgradeTransportError } from '../../lib/upgrade/errors';
 import { createUpgradeFacade } from '../../lib/upgrade/facade';
@@ -36,6 +36,36 @@ function fixture(obtained: AssuranceBar = { level: 2, acrValues: '2' }) {
   return { controller, driver, summaries, commits };
 }
 const request = (name: string) => ({ kind: 'request' as const, url: 'https://app.example/' + name, method: 'GET' });
+
+describe("the server's available_factors at step-up", () => {
+  test('a TOTP-only user is prompted with TOTP and recovery codes, TOTP first, and no passkey', async () => {
+    const driver = promptDriver();
+    const controller = new UpgradeController({
+      platform: createMockPlatform(),
+      prompt: driver.prompt,
+      transport: { prepare: async () => undefined, commit: async () => undefined },
+      readObtainedBar: () => ({ level: 2, acrValues: '2' }),
+    });
+    const pending = controller.elevate(
+      { ...challenge(2), status: 403, availableFactors: ['totp', 'recovery_codes'] },
+      request('a'),
+    );
+    await vi.waitFor(() => expect(driver.requests).toHaveLength(1));
+
+    expect(driver.requests[0]!.factors.map((factor) => factor.type)).toEqual(['totp', 'recovery_codes']);
+    driver.cancel(0);
+    await pending.catch(() => undefined);
+  });
+
+  test("a stronger join keeps the server's list", () => {
+    const merged = mergeChallenges({ ...challenge(2), availableFactors: ['totp'] }, challenge(3));
+    expect(merged.availableFactors).toEqual(['totp']);
+    expect(mergeChallenges(challenge(2), { ...challenge(3), availableFactors: ['totp', 'passkey'] }).availableFactors).toEqual([
+      'totp',
+      'passkey',
+    ]);
+  });
+});
 
 describe('UNKNOWN assurance is not authorization', () => {
   test.each([{}, { acrValues: 'opaque' }, { maxAge: 10 }])(

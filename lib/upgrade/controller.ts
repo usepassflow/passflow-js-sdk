@@ -390,6 +390,8 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
         : Math.min(current.maxAge, incoming.maxAge);
 
   const channels = Array.from(new Set([...(current.channels ?? []), ...(incoming.channels ?? [])]));
+  // The user's factors do not depend on the bar: the newest list the server sent stands.
+  const availableFactors = incoming.availableFactors ?? current.availableFactors;
 
   return {
     acrValues,
@@ -397,6 +399,7 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
     maxAge,
     status: current.status,
     ...(channels.length > 0 ? { channels } : {}),
+    ...(availableFactors ? { availableFactors } : {}),
   };
 };
 

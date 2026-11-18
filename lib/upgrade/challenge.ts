@@ -17,6 +17,7 @@
  */
 
 import { type AcrReading, readAcrValues } from './acr';
+import type { UpgradeFactorType } from './factors';
 
 /** The error code RFC 9470 §3 defines for an insufficient authentication event. */
 export const INSUFFICIENT_USER_AUTHENTICATION = 'insufficient_user_authentication';
@@ -55,6 +56,11 @@ export type UpgradeChallenge = {
   maxAge?: number;
   /** The status that carried the challenge: 401 (protected resource) or 403 (session exchange). */
   status: number;
+  /**
+   * The factors this user can use, in the order to offer them, from the `403` body's
+   * `available_factors`. Absent when the server does not send it (older servers, the header channel).
+   */
+  availableFactors?: UpgradeFactorType[];
   /**
    * Every channel that PARSED AS A CHALLENGE in any field — not only the
    * channels that won a comparison. An opaque header contributes no constraint
@@ -179,10 +185,14 @@ export const parseChallengeBody = (body: unknown, status: number): UpgradeChalle
     return undefined;
   }
 
+  const availableFactors = Array.isArray(data.available_factors)
+    ? (data.available_factors.filter((factor) => typeof factor === 'string') as UpgradeFactorType[])
+    : undefined;
   return {
     acrValues: typeof data.acr_values === 'string' && data.acr_values ? data.acr_values : undefined,
     maxAge: maxAgeValue(data.max_age),
     status,
+    ...(availableFactors ? { availableFactors } : {}),
   };
 };
 
@@ -437,6 +447,7 @@ export const readUpgradeChallenge = (input: ChallengeInput, options?: ChallengeR
       maxAge,
       status,
       channels: channels.map((reading) => reading.channel),
+      ...(bodyChallenge?.availableFactors ? { availableFactors: bodyChallenge.availableFactors } : {}),
     },
     diagnostics,
   };

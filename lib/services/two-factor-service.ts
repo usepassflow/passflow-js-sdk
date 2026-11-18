@@ -260,7 +260,7 @@ export class TwoFactorService {
   private setupConfirmed(response: TwoFactorConfirmResponse): TwoFactorConfirmResponse {
     // Emit event with recovery codes and cleanup callback
     // The clearRecoveryCodes callback modifies the original response.recovery_codes array.
-    // An app that does not use recovery codes gets none.
+    // The server issues codes on every enrolment; an answer from a server that omits them gets none.
     const recoveryCodes = response.recovery_codes ?? [];
     this.subscribeStore.notify(PassflowEvent.TwoFactorEnabled, {
       recoveryCodes,

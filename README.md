@@ -704,7 +704,7 @@ switch (enrollment) {
     break;
   case "direct": { // no factor, no validated email: enrol on this sign-in
     const setup = await passflow.beginTwoFactorEnrollment(); // setup.secret, setup.qr_code (base64 PNG)
-    const { recovery_codes } = await passflow.confirmTwoFactorEnrollment(code); // show these once; absent when the app uses none
+    const { recovery_codes } = await passflow.confirmTwoFactorEnrollment(code); // show these once
     await passflow.verifyTwoFactor(code); // the same code finishes the sign-in
     break;
   }
@@ -721,7 +721,9 @@ switch (enrollment) {
   code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until
   an answer gives the count, `verifyTwoFactor` accepts 6 or 8 digits and the server decides. The
   count lasts one sign-in.
-- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). Older 8-character `XXXX-XXXX`
+- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). The server issues recovery codes
+  on every enrolment; `recovery_codes` on confirm is optional only so an older or different server
+  that omits it doesn't break the type. Older 8-character `XXXX-XXXX`
   codes still work until they are regenerated. The SDK checks only the form (letters, digits and
   optional dashes) and upper-cases the code; the server decides whether it is valid. `remaining_recovery_codes` may be
   absent from the answer.

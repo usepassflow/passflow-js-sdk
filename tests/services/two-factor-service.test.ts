@@ -440,7 +440,7 @@ describe('TwoFactorService', () => {
       );
     });
 
-    // REGRESSION: an app without recovery codes confirms with no recovery_codes at all
+    // REGRESSION: an older or different server may confirm with no recovery_codes at all
     test('an answer with no recovery codes emits TwoFactorEnabled with none', async () => {
       mockTwoFactorApi.confirmSetup.mockResolvedValue({ enabled: true });
 

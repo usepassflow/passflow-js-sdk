@@ -1046,7 +1046,10 @@ export type TwoFactorSetupResponse = {
 
 export type TwoFactorConfirmResponse = {
   enabled: boolean;
-  /** Absent when the app does not use recovery codes. */
+  /**
+   * The server issues recovery codes on every enrolment; the field is optional only so an older or
+   * different server that omits it doesn't break the type.
+   */
   recovery_codes?: string[];
 };
 

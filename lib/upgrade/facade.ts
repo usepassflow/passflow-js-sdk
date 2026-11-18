@@ -272,6 +272,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       },
       commitRefresh: (upgrade) => {
         assertCurrent();
+        commitSentAt = Date.now();
         // The pin travels with the commit so the host can verify it at the
         // moment it APPLIES the rotated tokens. `assertCurrent` above is the
         // epoch half and runs first; the two are complementary — the epoch says
@@ -328,6 +329,8 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
    * to hand back an elevation that belongs to a different session than the
    * challenge did.
    */
+  /** When the latest commit request went out: the time a proof is remembered from. */
+  let commitSentAt: number | undefined;
   /** How long a proof counts against the same requirement coming back. */
   const PROOF_MEMORY_MS = 60_000;
   /** The challenge this page last proved and when, under `stopRepeatedElevation`. */
@@ -384,7 +387,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       throw new UpgradeSessionChangedError();
     }
 
-    if (deps.stopRepeatedElevation) lastProven = { challenge, at: Date.now() };
+    if (deps.stopRepeatedElevation) lastProven = { challenge, at: commitSentAt ?? Date.now() };
     return elevation;
   };
 

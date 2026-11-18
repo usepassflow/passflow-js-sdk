@@ -335,7 +335,7 @@ describe('hosted upgrade cookie-only transport', () => {
     }
   });
 
-  test('an acr-only proof is remembered only briefly: the same requirement prompts again after a minute', async () => {
+  test('a level-only proof counts for 60 seconds: refused at 59 s, prompts again at 61 s', async () => {
     const f = start();
     let prompts = 0;
     const disable = f.passflow.hostedUpgrade.enable({
@@ -350,13 +350,42 @@ describe('hosted upgrade cookie-only transport', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     try {
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
-      now.mockReturnValue(1_000_000 + 30_000);
+      now.mockReturnValue(1_000_000 + 59_000);
       await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
         UpgradeInsufficientError,
       );
       expect(prompts).toBe(1);
 
-      now.mockReturnValue(1_000_000 + 16 * 60_000);
+      now.mockReturnValue(1_000_000 + 61_000);
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+    } finally {
+      disable();
+    }
+  });
+
+  test('the proof time is taken when the commit request goes out, not when it answers', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const f = start(undefined, (config) => {
+      // The commit takes ten seconds to answer.
+      if (config.url === COMMIT_PATH) now.mockReturnValue(Date.now() + 10_000);
+      return hostedAnswer(config);
+    });
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const aal2 = { status: 403, acrValues: '2', requiredLevel: 2 };
+    try {
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 61_000);
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
       expect(prompts).toBe(2);
     } finally {

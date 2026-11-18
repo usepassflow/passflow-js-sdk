@@ -1,4 +1,5 @@
 export { type AcrReading, parseAcrToken, readAcrValues, requiredAcrLevel } from './acr';
+export type { WithAuthOptions } from './attach-token';
 export {
   type AxiosConfigLike,
   type AxiosReissue,

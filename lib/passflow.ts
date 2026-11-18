@@ -87,6 +87,7 @@ import {
   type ResponseInterceptorHost,
   readAcrValues,
   type UpgradeFacade,
+  type WithAuthOptions,
 } from './upgrade';
 import { isValidJWTFormat, sanitizeErrorMessage } from './utils/validation';
 
@@ -297,6 +298,7 @@ export class Passflow {
       },
       attachInternalSeam: (factory) => this.attachUpgradeSeam(factory),
       onSessionChange: (listener) => this.subscribeToSessionChange(listener),
+      readAccessToken: async () => (await this.getTokens(true))?.access_token,
     });
 
     // Second facade with its own controller. No seam on the SDK clients, no session-change hook
@@ -384,7 +386,12 @@ export class Passflow {
   }
 
   /**
-   * Wraps a `fetch`, returning a new function with step-up handling attached.
+   * Wraps a `fetch`, returning a new function that adds the access token and handles step-up.
+   *
+   * A request for the page's own origin or one in `options.origins` (compared exactly: scheme, host
+   * and port) that has no `Authorization` header gets `Bearer <access token>`, refreshed first when
+   * it has expired. Any other origin, a request with its own header, and a request with no
+   * signed-in user go out as given.
    *
    * Installs nothing and touches no global — this is the SSR- and
    * React-Native-safe surface. Two verbs exist because the semantics genuinely
@@ -397,15 +404,15 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * const authedFetch = passflow.withAuth(fetch);
+   * const authedFetch = passflow.withAuth(fetch, { origins: ['https://api.example.com'] });
    * const res = await authedFetch('https://api.example.com/transfer', { method: 'POST' });
    * if (!res.ok && isUpgradeCancelled(res)) {
    *   // the user declined the step-up — not an authorization failure
    * }
    * ```
    */
-  withAuth(next?: FetchLike): FetchLike {
-    return this.upgrade.withAuth(next);
+  withAuth(next?: FetchLike, options?: WithAuthOptions): FetchLike {
+    return this.upgrade.withAuth(next, options);
   }
 
   /**

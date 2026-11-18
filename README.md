@@ -2,6 +2,15 @@
 
 ## Changelog
 
+### Version 0.32.0
+
+- `passflow.withAuth(fetch, { origins })` adds `Authorization: Bearer <access token>` to a request
+  for the page's own origin or a listed origin when the request has no `Authorization` header,
+  refreshing an expired token first. Other origins get no token. Before, it only handled step-up, so
+  a request without the header now carries one. See
+  [Calling your API with the access token](#calling-your-api-with-the-access-token).
+- `WithAuthOptions` is exported.
+
 ### Version 0.31.0
 
 Matches the SDK to the server's real two-factor, step-up and sign-out answers.
@@ -909,6 +918,30 @@ with nothing saved. Verification needs the Web Crypto API (https or localhost). 
 `state` when the URL had one. A federated popup that returns tokens in its callback URL (query or
 fragment) follows the same Simple-only rule and is verified the same way; on a PKCE app it requires a
 code.
+
+### Calling your API with the access token
+
+`passflow.withAuth(fetch, options?)` returns a `fetch` that adds `Authorization: Bearer <access
+token>` for you, and handles a step-up challenge on the answer:
+
+```javascript
+const api = passflow.withAuth(fetch, { origins: ["https://api.example.com"] });
+const res = await api("https://api.example.com/orders"); // carries the token
+await api("/api/me"); // the page's own origin: carries the token
+await api("https://cdn.example.net/data.json"); // any other origin: no token
+```
+
+- The token goes only to the page's own origin (`location.origin`) and to the origins in
+  `options.origins`. Origins are compared exactly, scheme, host and port: `https://api.example.com`
+  does not cover `http://api.example.com`, `https://api.example.com:8443` or
+  `https://api.example.com.evil.com`. A relative URL resolves against the page. Outside a browser page
+  (SSR, React Native) only the listed origins get it. An `origins` entry that is not a URL throws.
+- A request that already has an `Authorization` header goes out as you set it.
+- An expired access token is refreshed first, as `getTokens(true)` does. With no signed-in user, or
+  when the refresh fails, no header is added.
+- A cookie or BFF session holds no access token in the page, so nothing is added there.
+- `attachAuth(axios)` and `createClient()` still only handle step-up; set the header on those
+  clients yourself.
 
 ### Token refresh across tabs
 

@@ -231,14 +231,18 @@ type ErrorFacts = {
   errorId?: string;
   message?: string;
   hasResponse: boolean;
-  /** The plain-text `error` a body without the Passflow envelope carries (the rate limiter's 429). */
+  /** The server's text: a plain-text `error`, or the envelope's `error.message`. */
   serverText?: string;
   retryAfter?: number;
 };
 
-/** The `error` of a body that carries plain text there instead of the Passflow envelope. */
+/**
+ * The server's own text for the failure: a plain-text `error` (the verify rate
+ * limiter's body), or the `error.message` of the Passflow envelope.
+ */
 const plainErrorText = (data: unknown): string | undefined => {
-  const text = (data as { error?: unknown } | undefined)?.error;
+  const error = (data as { error?: unknown } | undefined)?.error;
+  const text = typeof error === 'string' ? error : (error as { message?: unknown } | undefined)?.message;
   return typeof text === 'string' && text ? text : undefined;
 };
 
@@ -402,7 +406,8 @@ export const classifyUpgradeError = (e: unknown, endpoint: UpgradeEndpoint): Upg
   const kind = kindFromErrorId(facts.errorId, endpoint) ?? kindFromStatus(facts.status, endpoint);
 
   if (kind === 'rate_limited') {
-    // The limiter's body is `{ "error": "<text>" }`: that text, not axios' status line, is the message.
+    // The server's text (the verify limiter's `{ "error": "<text>" }` or the envelope's message), not
+    // axios' status line, is the message.
     return new UpgradeTransportError({
       kind,
       message: facts.serverText,

@@ -31,4 +31,22 @@ describe('a 429 on either step-up round', () => {
     expect(error.retryAfter).toBeUndefined();
     expect(error.message).toBe('Too many requests. Try again later.');
   });
+
+  test("a 429 in the Passflow error envelope uses the envelope's message and id", () => {
+    const error = classifyUpgradeError(
+      Object.assign(new Error('Request failed with status code 429'), {
+        response: {
+          status: 429,
+          headers: { 'retry-after': '30' },
+          data: { error: { id: 'error.api.rate_limit.exceeded', message: 'Too many refresh requests.', status: 429 } },
+        },
+      }),
+      'refresh',
+    );
+
+    expect(error.kind).toBe('rate_limited');
+    expect(error.message).toBe('Too many refresh requests.');
+    expect(error.errorId).toBe('error.api.rate_limit.exceeded');
+    expect(error.retryAfter).toBe(30);
+  });
 });

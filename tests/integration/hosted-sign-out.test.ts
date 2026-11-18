@@ -132,6 +132,41 @@ describe('a hosted sign-in in Simple mode', () => {
   });
 });
 
+describe('app code that throws during logOut', () => {
+  test('a throwing SignOut subscriber does not keep the hosted session alive', async () => {
+    const { h, c, slot, idToken } = await sdkModeSignIn();
+    c.sdk.subscribe(
+      {
+        onAuthChange: () => {
+          throw new Error('subscriber failed');
+        },
+      },
+      [PassflowEvent.SignOut],
+    );
+    const before = h.navigations.length;
+    await expect(c.sdk.logOut()).rejects.toThrow('subscriber failed');
+    await settle();
+    const sent = h.navigations.slice(before);
+    expect(sent).toHaveLength(1);
+    expectEndSession(sent[0]!, { idToken, redirect: slot.redirectUri });
+  });
+
+  test('a throwing expiredSession callback does not keep the hosted session alive', async () => {
+    const { h, c, slot, idToken } = await sdkModeSignIn();
+    await c.sdk.session({
+      expiredSession: async () => {
+        throw new Error('callback failed');
+      },
+    });
+    const before = h.navigations.length;
+    await expect(c.sdk.logOut()).rejects.toThrow('callback failed');
+    await settle();
+    const sent = h.navigations.slice(before);
+    expect(sent).toHaveLength(1);
+    expectEndSession(sent[0]!, { idToken, redirect: slot.redirectUri });
+  });
+});
+
 describe('a session that did not come from the hosted login', () => {
   test('logOut does not navigate', async () => {
     const h = modeHarness(SIMPLE_APP);

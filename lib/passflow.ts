@@ -1323,12 +1323,16 @@ export class Passflow {
       const endSessionUrl = this.authService.hostedEndSessionUrl(options.postLogoutRedirectUri);
       // Under the refresh lock: logs out the newest token, deletes storage, clears the cache.
       const userId = await this.authService.logOut();
-      this.twoFactorService.clearPartialAuthState();
-      // Exactly one SignOut, after the cache is cleared; also when the session had already ended.
-      this.notifySignedOut(userId);
-      await this.submitSessionCheck();
-      // A hosted sign-in also left a session on the hosted login; only a visit there ends it.
-      if (endSessionUrl) this.platform.navigateTo(endSessionUrl);
+      try {
+        this.twoFactorService.clearPartialAuthState();
+        // Exactly one SignOut, after the cache is cleared; also when the session had already ended.
+        this.notifySignedOut(userId);
+        await this.submitSessionCheck();
+      } finally {
+        // A hosted sign-in also left a session on the hosted login; only a visit there ends it.
+        // The record it is built from is already deleted, so it goes even when app code threw.
+        if (endSessionUrl) this.platform.navigateTo(endSessionUrl);
+      }
     } catch (error) {
       this.handleError(error, 'log-out', 'Log out');
     }

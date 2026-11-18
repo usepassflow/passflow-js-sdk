@@ -201,6 +201,7 @@ export class AxiosClient {
       storageManager ??
       new StorageManager({
         prefix: keyStoragePrefix ?? '',
+        appId,
       });
     this.deviceService = deviceService ?? new DeviceService(this.storageManager);
     this.tokenService = new TokenService(this.storageManager);

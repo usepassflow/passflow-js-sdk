@@ -1,0 +1,89 @@
+import { describe, expect, test } from 'vitest';
+import { StorageManager } from '../../lib/storage/index';
+import { TokenType } from '../../lib/token/token';
+import { TokenDeliveryMode } from '../../lib/types';
+import { FakeStorage } from './fake-storage';
+
+const b64 = (value: unknown): string => btoa(JSON.stringify(value)).replace(/=+$/, '');
+const jwt = (claims: Record<string, unknown>): string => `${b64({ alg: 'none' })}.${b64(claims)}.sig`;
+const tokenFor = (aud: string[] | string, type: string): string =>
+  jwt({ aud, type, sub: 'user-1', exp: Math.floor(Date.now() / 1000) + 3600, iat: 1 });
+
+const tokensFor = (aud: string[] | string) => ({
+  access_token: tokenFor(aud, 'access'),
+  refresh_token: tokenFor(aud, 'refresh'),
+  id_token: tokenFor(aud, 'id'),
+  scopes: ['id'],
+});
+
+describe('stored tokens are bound to the app', () => {
+  test("another app's stored tokens read as absent", () => {
+    const storage = new FakeStorage();
+    new StorageManager({ storage }).saveTokens(tokensFor(['app-a']));
+
+    const manager = new StorageManager({ storage, appId: 'app-b' });
+    expect(manager.getTokens()).toBeUndefined();
+    expect(manager.getToken(TokenType.access_token)).toBeUndefined();
+    expect(manager.getToken(TokenType.refresh_token)).toBeUndefined();
+    expect(manager.getToken(TokenType.id_token)).toBeUndefined();
+    expect(manager.hasJsonModeTokens()).toBe(false);
+  });
+
+  test("this app's stored tokens are read as before", () => {
+    const storage = new FakeStorage();
+    const tokens = tokensFor(['app-a']);
+    const manager = new StorageManager({ storage, appId: 'app-a' });
+    manager.saveTokens(tokens);
+    expect(manager.getTokens()).toEqual(tokens);
+    expect(manager.getToken(TokenType.refresh_token)).toBe(tokens.refresh_token);
+  });
+
+  test('a string aud is accepted too', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage, appId: 'app-a' });
+    manager.saveTokens(tokensFor('app-a'));
+    expect(manager.getTokens()?.access_token).toBeDefined();
+  });
+
+  test('the cookie-mode id token of another app reads as absent', () => {
+    const storage = new FakeStorage();
+    new StorageManager({ storage }).saveTokens(tokensFor(['app-a']), TokenDeliveryMode.Cookie);
+    storage.setItem('passflow_delivery_mode', TokenDeliveryMode.Cookie);
+
+    const manager = new StorageManager({ storage, appId: 'app-b' });
+    expect(manager.getIdToken()).toBeUndefined();
+    expect(manager.hasCookieModeIdToken()).toBe(false);
+    expect(manager.getTokens()).toBeUndefined();
+  });
+
+  test('setAppId switches the app the tokens must belong to', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage, appId: 'app-b' });
+    manager.saveTokens(tokensFor(['app-a']));
+    expect(manager.getTokens()).toBeUndefined();
+    manager.setAppId('app-a');
+    expect(manager.getTokens()?.access_token).toBeDefined();
+  });
+
+  test('with no app id every stored token counts', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage });
+    manager.saveTokens(tokensFor(['app-a']));
+    expect(manager.getTokens()?.access_token).toBeDefined();
+  });
+
+  test('a JWT with no audience counts, since it names no other app', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage, appId: 'app-a' });
+    const access = jwt({ sub: 'user-1', type: 'access' });
+    manager.saveTokens({ access_token: access });
+    expect(manager.getTokens()?.access_token).toBe(access);
+  });
+
+  test('a token that is not a JWT is left to the token checks', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage, appId: 'app-a' });
+    manager.saveTokens({ access_token: 'opaque', refresh_token: 'opaque-refresh' });
+    expect(manager.getTokens()?.access_token).toBe('opaque');
+  });
+});

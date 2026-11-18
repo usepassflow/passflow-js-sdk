@@ -9,6 +9,7 @@
  */
 
 import { TokenType } from '../token';
+import { parseToken } from '../token/service';
 import { TokenDeliveryMode, Tokens } from '../types';
 
 export type Storage = {
@@ -20,6 +21,8 @@ export type Storage = {
 export interface StorageManagerParams {
   storage?: Storage;
   prefix?: string;
+  /** The app the stored tokens must be issued for; see `setAppId()`. */
+  appId?: string;
 }
 
 export class StorageManager {
@@ -36,10 +39,42 @@ export class StorageManager {
   private readonly DELIVERY_MODE_KEY = `${this.STORAGE_PREFIX}delivery_mode`;
 
   private storage: Storage;
+  private appId: string | undefined;
 
-  constructor({ storage, prefix }: StorageManagerParams = {}) {
+  constructor({ storage, prefix, appId }: StorageManagerParams = {}) {
     this.storage = storage ?? localStorage;
     this.keyStoragePrefix = prefix ? `${prefix}_` : '';
+    this.appId = appId || undefined;
+  }
+
+  /**
+   * Sets the app the stored tokens must be issued for. A stored token whose `aud` does not name
+   * this app reads as absent, so another app's session on the same origin never counts as this
+   * app's. With no app id, every stored token counts.
+   */
+  setAppId(appId: string | undefined): void {
+    this.appId = appId || undefined;
+  }
+
+  /** The stored value, or undefined when it is a JWT issued for another app than this one. */
+  private ownToken(value: string | null): string | undefined {
+    if (!value) return undefined;
+    if (!this.appId) return value;
+    let aud: unknown;
+    try {
+      aud = parseToken(value).aud;
+    } catch {
+      // Not a JWT: no audience to check.
+      return value;
+    }
+    // A token with no audience names no other app.
+    if (aud === undefined) return value;
+    const audience = Array.isArray(aud) ? aud : [aud];
+    return audience.includes(this.appId) ? value : undefined;
+  }
+
+  private readToken(key: string): string | undefined {
+    return this.ownToken(this.storage.getItem(key));
   }
 
   /**
@@ -66,8 +101,7 @@ export class StorageManager {
   }
 
   getToken(tokenType: TokenType): string | undefined {
-    const key = this.getKeyForTokenType(tokenType);
-    return this.storage.getItem(key) ?? undefined;
+    return this.readToken(this.getKeyForTokenType(tokenType));
   }
 
   /**
@@ -80,7 +114,7 @@ export class StorageManager {
 
     if (mode === TokenDeliveryMode.Cookie || mode === TokenDeliveryMode.BFF) {
       // Cookie/BFF mode: return ID token only (access/refresh in HttpOnly cookies)
-      const idToken = this.storage.getItem(this.ID_TOKEN_KEY);
+      const idToken = this.readToken(this.ID_TOKEN_KEY);
       if (!idToken) return undefined;
       return {
         id_token: idToken,
@@ -89,12 +123,12 @@ export class StorageManager {
     }
 
     // JSON mode: return all stored tokens (existing behavior)
-    const access = this.storage.getItem(this.getKeyForTokenType(TokenType.access_token));
+    const access = this.readToken(this.getKeyForTokenType(TokenType.access_token));
     if (!access) return undefined;
     return {
       access_token: access,
-      id_token: this.storage.getItem(this.getKeyForTokenType(TokenType.id_token)) ?? undefined,
-      refresh_token: this.storage.getItem(this.getKeyForTokenType(TokenType.refresh_token)) ?? undefined,
+      id_token: this.readToken(this.getKeyForTokenType(TokenType.id_token)),
+      refresh_token: this.readToken(this.getKeyForTokenType(TokenType.refresh_token)),
       scopes: this.storage.getItem(this.scopes)?.split(',') ?? undefined,
     };
   }
@@ -108,8 +142,7 @@ export class StorageManager {
    * Used to detect stale state where delivery_mode is set but JSON tokens exist
    */
   hasJsonModeTokens(): boolean {
-    const accessToken = this.storage.getItem(this.getKeyForTokenType(TokenType.access_token));
-    return !!accessToken;
+    return !!this.readToken(this.getKeyForTokenType(TokenType.access_token));
   }
 
   /**
@@ -117,8 +150,7 @@ export class StorageManager {
    * Used to detect legitimate cookie/BFF mode sessions
    */
   hasCookieModeIdToken(): boolean {
-    const idToken = this.storage.getItem(this.ID_TOKEN_KEY);
-    return !!idToken;
+    return !!this.readToken(this.ID_TOKEN_KEY);
   }
 
   deleteToken(tokenType: TokenType): void {
@@ -223,7 +255,7 @@ export class StorageManager {
    */
   getIdToken(): string | undefined {
     try {
-      return this.storage.getItem(this.ID_TOKEN_KEY) ?? undefined;
+      return this.readToken(this.ID_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors
       return undefined;

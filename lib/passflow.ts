@@ -185,6 +185,7 @@ export class Passflow {
     this.storageManager = new StorageManager({
       prefix: config.keyStoragePrefix ?? '',
       storage: this.platform.storage,
+      appId,
     });
 
     // Initialize single DeviceService instance with shared StorageManager
@@ -358,6 +359,7 @@ export class Passflow {
    */
   setAppId(appId: string): void {
     this.appId = appId;
+    this.storageManager.setAppId(appId);
     this.appSettingsRead = undefined;
 
     // Update all API clients

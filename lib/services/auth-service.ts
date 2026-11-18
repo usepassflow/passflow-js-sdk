@@ -104,6 +104,16 @@ export type AuthRedirectOptions = {
   state?: string;
 };
 
+/** Options of `logOut()`. */
+export type LogOutOptions = {
+  /**
+   * After a hosted sign-in: where the hosted login sends the browser once its own session has
+   * ended. It must match one of the app's registered redirect URLs; an unmatched one leaves the
+   * user on the Passflow server's start page. Default: the address the hosted sign-in landed on.
+   */
+  postLogoutRedirectUri?: string;
+};
+
 /** How this instance's refresh controller coordinates (architecture §3.3, §3.4). */
 export type AuthServiceRefreshOptions = {
   coordination: ResolvedCoordination;
@@ -1210,6 +1220,24 @@ export class AuthService {
     return userId;
   }
 
+  /**
+   * Where the page goes to end the hosted login's own session, when the stored session came from
+   * the hosted login; undefined otherwise. The hosted login keeps a session cookie on the Passflow
+   * host that only a top-level visit to `/oidc/end_session` can end. With the stored ID token as
+   * `id_token_hint` the server ends it at once and redirects to `post_logout_redirect_uri`, which
+   * must match one of the app's registered redirect URLs: by default the address the hosted
+   * sign-in landed on. Read before `logOut()`, which deletes what it is built from.
+   */
+  hostedEndSessionUrl(postLogoutRedirectUri?: string): string | undefined {
+    const landedOn = this.storageManager.getHostedSignIn();
+    if (!landedOn) return undefined;
+    const params: Record<string, string> = { post_logout_redirect_uri: postLogoutRedirectUri ?? landedOn };
+    if (this.appId) params.client_id = this.appId;
+    const idToken = this.storageManager.getToken(TokenType.id_token) ?? this.storageManager.getIdToken();
+    if (idToken) params.id_token_hint = idToken;
+    return `${this.url.replace(/\/+$/, '')}/oidc/end_session?${new URLSearchParams(params)}`;
+  }
+
   /** The logout API call. Server-side cleanup is best effort: every failure is ignored. */
   private async callLogoutApi(newestRefreshToken: string | undefined): Promise<void> {
     // BFF mode: call BFF logout endpoint to clear httpOnly cookies
@@ -1950,17 +1978,24 @@ export class AuthService {
           sanitizeErrorMessage(errorDescription || error || 'Sign in again.'),
         );
       }
-      return { tokens: await redeemOidcCode(this.url, code, read.slot), scopes: read.slot.scopes };
+      return {
+        tokens: await redeemOidcCode(this.url, code, read.slot),
+        scopes: read.slot.scopes,
+        returnUrl: read.slot.redirectUri,
+      };
     });
     return true;
   }
 
-  private async finishOidcLanding(redeem: () => Promise<{ tokens: Tokens; scopes: string[] }>): Promise<void> {
+  private async finishOidcLanding(
+    redeem: () => Promise<{ tokens: Tokens; scopes: string[]; returnUrl: string }>,
+  ): Promise<void> {
     try {
       // Every outcome comes after an await, so a subscriber attached right after this call sees it.
       await Promise.resolve();
-      const { tokens, scopes } = await redeem();
+      const { tokens, scopes, returnUrl } = await redeem();
       await this.processAuthResponse(tokens, scopes);
+      this.storageManager.setHostedSignIn(returnUrl);
       this.subscribeStore.notify(PassflowEvent.SignIn, {
         tokens,
         parsedTokens: this.tokenCacheService.getParsedTokens(),

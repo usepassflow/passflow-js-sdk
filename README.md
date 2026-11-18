@@ -160,6 +160,17 @@ const simpleSignOut = async () => {
 };
 ```
 
+After a hosted sign-in (`authRedirect()`), `logOut()` also ends the hosted login's own session.
+Otherwise the next hosted sign-in would go through with no password. Once the local sign-out and
+its `SignOut` event have run, the page leaves for the server's `/oidc/end_session`, which returns
+the browser to `postLogoutRedirectUri`. By default that is the address the hosted sign-in landed
+on, and it must match one of the app's registered redirect URLs. Code after `await logOut()` may
+not run then. A sign-in made in the app itself never navigates.
+
+```javascript
+await passflow.logOut({ postLogoutRedirectUri: "https://app.example.com/signed-out" });
+```
+
 ### Quick Passwordless Authentication
 
 ```javascript
@@ -1042,7 +1053,7 @@ Configuration options:
 | `session({ createSession, expiredSession, doRefresh })`    | Set up session management              |
 | `signIn(payload)`                                          | Sign in with email/password            |
 | `signUp(payload)`                                          | Register a new user                    |
-| `logOut()`                                                 | Sign out the current user              |
+| `logOut(options?)`                                         | Sign out the current user              |
 | `passwordlessSignIn(payload)`                              | Start passwordless authentication      |
 | `passwordlessSignInComplete(payload)`                      | Complete passwordless authentication   |
 | `federatedAuthWithPopup(provider, redirectUrl, scopes)`    | Sign in with a provider using popup    |

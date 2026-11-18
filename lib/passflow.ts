@@ -60,6 +60,7 @@ import {
   type AuthRedirectOptions,
   AuthService,
   InvitationService,
+  type LogOutOptions,
   TenantService,
   TokenCacheService,
   TwoFactorService,
@@ -777,6 +778,7 @@ export class Passflow {
           // Clear any stored delivery mode to ensure consistent behavior
           this.storageManager.clearDeliveryMode();
           this.storageManager.saveTokens(tokens);
+          if (currentUrl) this.storageManager.setHostedSignIn(currentUrl.origin + currentUrl.pathname);
           this.tokenCacheService.setTokensCache(tokens);
           this.authService.refresh.sessionStarted();
         })
@@ -1289,6 +1291,14 @@ export class Passflow {
   /**
    * Sign out the current user and clear all tokens.
    *
+   * When the session came from the hosted login (`authRedirect()`, either mode), the page then
+   * leaves for the server's `/oidc/end_session`, which ends the hosted login's own session and
+   * sends the browser to `options.postLogoutRedirectUri`, by default the address the hosted
+   * sign-in landed on. Code after `await logOut()` may then not run. A sign-in made in the app
+   * itself never navigates.
+   *
+   * @param options.postLogoutRedirectUri - where to return after a hosted sign-out; must match one
+   * of the app's registered redirect URLs
    * @returns Promise that resolves when sign-out is complete
    * @throws {PassflowError} If sign-out request fails
    *
@@ -1303,14 +1313,17 @@ export class Passflow {
    * }
    * ```
    */
-  async logOut(): Promise<void> {
+  async logOut(options: LogOutOptions = {}): Promise<void> {
     try {
+      const endSessionUrl = this.authService.hostedEndSessionUrl(options.postLogoutRedirectUri);
       // Under the refresh lock: logs out the newest token, deletes storage, clears the cache.
       const userId = await this.authService.logOut();
       this.twoFactorService.clearPartialAuthState();
       // Exactly one SignOut, after the cache is cleared; also when the session had already ended.
       this.notifySignedOut(userId);
       await this.submitSessionCheck();
+      // A hosted sign-in also left a session on the hosted login; only a visit there ends it.
+      if (endSessionUrl) this.platform.navigateTo(endSessionUrl);
     } catch (error) {
       this.handleError(error, 'log-out', 'Log out');
     }

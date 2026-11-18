@@ -171,6 +171,24 @@ export class StorageManager {
     // Clear delivery mode and CSRF token to ensure clean state for next session
     this.clearDeliveryMode();
     this.clearCsrfToken();
+    this.storage.removeItem(this.hostedSignInKey());
+  }
+
+  /**
+   * Records that the stored session came from the hosted login, with the address it landed on.
+   * The hosted login keeps a session of its own, which a sign-out then ends too.
+   */
+  setHostedSignIn(returnUrl: string): void {
+    this.storage.setItem(this.hostedSignInKey(), returnUrl);
+  }
+
+  /** The address the hosted sign-in of the stored session landed on, or undefined. */
+  getHostedSignIn(): string | undefined {
+    return this.storage.getItem(this.hostedSignInKey()) || undefined;
+  }
+
+  private hostedSignInKey(): string {
+    return `${this.keyStoragePrefix}${this.STORAGE_PREFIX}hosted_sign_in`;
   }
 
   getDeviceId(): string | undefined {

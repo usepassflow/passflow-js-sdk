@@ -721,7 +721,8 @@ switch (enrollment) {
   code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until
   an answer gives the count, `verifyTwoFactor` accepts 6 or 8 digits and the server decides. The
   count lasts one sign-in.
-- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). The server issues recovery codes
+- **Recovery codes** are 12 characters by default, issued as `XXXX-XXXX-XXXX`; apps choose 10–16
+  (only 12 is grouped with dashes). The server issues recovery codes
   on every enrolment; `recovery_codes` on confirm is optional only so an older or different server
   that omits it doesn't break the type. Older 8-character `XXXX-XXXX`
   codes still work until they are regenerated. The SDK checks only the form (letters, digits and
@@ -733,7 +734,8 @@ switch (enrollment) {
   a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`, or no factor of the user's
   reaches the level): no prompt opens, an open prompt is closed (its `onClosed` is called), and the
   step-up rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
-  true). Sign the user in again, for example with `authRedirect()`. `UpgradeUnsatisfiableError`
+  true). Sign the user in again: an embedded app can call `authRedirect()`; the hosted login page
+  shows its own sign-in form instead. `UpgradeUnsatisfiableError`
   means the server listed only factors this SDK cannot complete.
 - **A hosted step-up is proved once per requirement.** `passflow.hostedUpgrade` remembers the
   challenge it last proved on this page. An `elevate()` with a challenge that is not strictly

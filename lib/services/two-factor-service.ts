@@ -55,6 +55,8 @@ export interface SignInCompleter {
   applyTokens(tokens: Tokens): Promise<void>;
   hasPendingPkceSignIn(): boolean;
   forgetPkceSignIn(): void;
+  /** Reports a finished sign-in: emits `SignIn` with these tokens, then runs the session check. */
+  notifySignedIn(tokens: Tokens): Promise<void>;
 }
 
 /** Error with optional id field */
@@ -749,6 +751,7 @@ export class TwoFactorService {
           refresh_token: completed.refresh_token,
         },
       });
+      await this.signInCompleter?.notifySignedIn(completed);
       return completed;
     } catch (error) {
       this.emitErrorAndThrow(error, '2fa.challenge.verify', 'Verify 2FA challenge');

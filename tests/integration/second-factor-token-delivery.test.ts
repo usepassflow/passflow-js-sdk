@@ -106,6 +106,28 @@ describe('second factor completion through Passflow', () => {
     },
   );
 
+  // REGRESSION: each way to finish a second factor emits exactly one SignIn
+  test.each<[string, (passflow: Passflow) => Promise<unknown>]>([
+    ['verifyTwoFactor', (passflow) => passflow.verifyTwoFactor('123456')],
+    [
+      'twoFactor.verifyV2',
+      (passflow) => passflow.twoFactor.verifyV2({ challenge_id: 'c-1', method: 'totp', response: '123456' }),
+    ],
+  ])('%s emits exactly one SignIn', async (_name, finish) => {
+    stubApis(false);
+    vi.spyOn(TwoFactorApiClient.prototype, 'verifyV2').mockResolvedValue({ ...VALID_TOKENS } as never);
+    const passflow = new Passflow(TEST_CONFIG);
+    await passflow.signIn(CREDENTIALS);
+    const signIns: unknown[] = [];
+    passflow.subscribe({ onAuthChange: (event, payload) => event === PassflowEvent.SignIn && signIns.push(payload) }, [
+      PassflowEvent.SignIn,
+    ]);
+
+    await finish(passflow);
+
+    expect(signIns).toHaveLength(1);
+  });
+
   test('joinInvitation keeps BFF tokens out of browser storage', async () => {
     const passflow = new Passflow(BFF_CONFIG);
     vi.spyOn(passflow.tenant, 'joinInvitation').mockResolvedValue({ ...VALID_TOKENS } as never);

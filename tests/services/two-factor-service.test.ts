@@ -279,6 +279,27 @@ describe('TwoFactorService', () => {
         { tokens: { access_token: VALID_TOKENS.access_token, refresh_token: VALID_TOKENS.refresh_token } },
       ]);
     });
+
+    // REGRESSION: a v2 verify that completes the sign-in emits SignIn once, after TwoFactorVerified
+    test.each<[string, boolean, Record<string, unknown>]>([
+      ['bare tokens', false, { access_token: VALID_TOKENS.access_token, refresh_token: VALID_TOKENS.refresh_token }],
+      ['a PKCE code', true, { code: CODE }],
+    ])('verifyV2 answered with %s emits SignIn once, after TwoFactorVerified', async (_name, pkceEnabled, answer) => {
+      const { twoFactorApi, service, events } = await pkceSignIn({ pkceEnabled });
+      twoFactorApi.verifyV2.mockResolvedValue(answer);
+      events.length = 0;
+
+      await service.verifyV2({ challenge_id: 'c', method: 'totp', response: '123456' });
+
+      const order = events
+        .map((e) => e.event)
+        .filter((event) => event === PassflowEvent.TwoFactorVerified || event === PassflowEvent.SignIn);
+      expect(order).toEqual([PassflowEvent.TwoFactorVerified, PassflowEvent.SignIn]);
+      expect(events.find((e) => e.event === PassflowEvent.SignIn)?.payload).toEqual({
+        tokens: expect.objectContaining({ access_token: VALID_TOKENS.access_token }),
+        parsedTokens: undefined,
+      });
+    });
   });
 
   // ===================================

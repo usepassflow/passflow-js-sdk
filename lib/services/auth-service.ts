@@ -646,6 +646,15 @@ export class AuthService {
     await this.processAuthResponse(response, response.scopes ?? this.readPendingPkce()?.scopes ?? this.scopes);
   }
 
+  /** Emits `SignIn` for a sign-in its second factor finished, then runs the session check. */
+  async notifySignedIn(tokens: Tokens): Promise<void> {
+    this.subscribeStore.notify(PassflowEvent.SignIn, {
+      tokens,
+      parsedTokens: this.tokenCacheService.getParsedTokens(),
+    });
+    await this.submitSessionCheck();
+  }
+
   /**
    * Forward tokens to BFF server for httpOnly cookie storage
    */

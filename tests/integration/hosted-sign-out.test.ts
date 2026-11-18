@@ -167,6 +167,17 @@ describe('app code that throws during logOut', () => {
   });
 });
 
+describe('another app on the same storage', () => {
+  test("logOut does not use the first app's hosted sign-in record", async () => {
+    const { h } = await sdkModeSignIn();
+    const other = h.client({ appId: 'another-app' });
+    const before = h.navigations.length;
+    await other.sdk.logOut();
+    await settle();
+    expect(h.navigations.slice(before)).toEqual([]);
+  });
+});
+
 describe('a session that did not come from the hosted login', () => {
   test('logOut does not navigate', async () => {
     const h = modeHarness(SIMPLE_APP);

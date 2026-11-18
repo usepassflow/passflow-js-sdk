@@ -87,3 +87,20 @@ describe('stored tokens are bound to the app', () => {
     expect(manager.getTokens()?.access_token).toBe('opaque');
   });
 });
+
+describe('the hosted sign-in record is bound to the app', () => {
+  test('another app on the same storage does not see it', () => {
+    const storage = new FakeStorage();
+    new StorageManager({ storage, appId: 'app-a' }).setHostedSignIn('https://a.example/cb');
+    expect(new StorageManager({ storage, appId: 'app-b' }).getHostedSignIn()).toBeUndefined();
+    expect(new StorageManager({ storage, appId: 'app-a' }).getHostedSignIn()).toBe('https://a.example/cb');
+  });
+
+  test('setAppId switches which record counts', () => {
+    const storage = new FakeStorage();
+    const manager = new StorageManager({ storage, appId: 'app-a' });
+    manager.setHostedSignIn('https://a.example/cb');
+    manager.setAppId('app-b');
+    expect(manager.getHostedSignIn()).toBeUndefined();
+  });
+});

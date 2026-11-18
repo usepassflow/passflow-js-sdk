@@ -179,12 +179,21 @@ export class StorageManager {
    * The hosted login keeps a session of its own, which a sign-out then ends too.
    */
   setHostedSignIn(returnUrl: string): void {
-    this.storage.setItem(this.hostedSignInKey(), returnUrl);
+    this.storage.setItem(this.hostedSignInKey(), JSON.stringify({ appId: this.appId ?? '', returnUrl }));
   }
 
-  /** The address the hosted sign-in of the stored session landed on, or undefined. */
+  /**
+   * The address the hosted sign-in of the stored session landed on, or undefined. A record another
+   * app wrote on the same origin does not count.
+   */
   getHostedSignIn(): string | undefined {
-    return this.storage.getItem(this.hostedSignInKey()) || undefined;
+    try {
+      const record = JSON.parse(this.storage.getItem(this.hostedSignInKey()) ?? '') as { appId?: unknown; returnUrl?: unknown };
+      if (record.appId !== (this.appId ?? '') || typeof record.returnUrl !== 'string') return undefined;
+      return record.returnUrl || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private hostedSignInKey(): string {

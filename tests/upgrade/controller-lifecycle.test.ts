@@ -306,6 +306,14 @@ describe("the server's available_factors at step-up", () => {
     await vi.waitFor(() => expect(controller.currentState).toBe('idle'));
   });
 
+  test("a weaker join never replaces the stronger requirement's list", () => {
+    const stronger = { ...challenge(3), availableFactors: ['passkey' as const], signInRequired: false };
+    const weaker = { ...challenge(2), availableFactors: ['totp' as const, 'passkey' as const], signInRequired: false };
+
+    expect(mergeChallenges(stronger, weaker).availableFactors).toEqual(['passkey']);
+    expect(mergeChallenges(weaker, stronger).availableFactors).toEqual(['passkey']);
+  });
+
   test("a stronger join keeps the server's list", () => {
     const merged = mergeChallenges({ ...challenge(2), availableFactors: ['totp'] }, challenge(3));
     expect(merged.availableFactors).toEqual(['totp']);

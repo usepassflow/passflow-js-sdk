@@ -434,9 +434,11 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
         : Math.min(current.maxAge, incoming.maxAge);
 
   const channels = Array.from(new Set([...(current.channels ?? []), ...(incoming.channels ?? [])]));
-  // The user's factors do not depend on the bar: the newest list the server sent stands, with the
-  // sign_in_required that came with it.
-  const listFrom = incoming.availableFactors ? incoming : current;
+  // The server lists the factors that meet ITS requirement, so the list follows the requirement that
+  // set the bar, with the sign_in_required that came with it: a weaker joiner's list never replaces
+  // a stronger one's. Otherwise the newest list stands.
+  const incomingWeaker = isStrictlyStronger(incoming, current) && !isStrictlyStronger(current, incoming);
+  const listFrom = incomingWeaker || !incoming.availableFactors ? current : incoming;
   const { availableFactors, signInRequired } = listFrom;
 
   return {
@@ -616,9 +618,11 @@ export class UpgradeController {
     this.requirement = mergeChallenges(current, incoming);
 
     if (unmeetableReason(this.requirement)) {
-      // No factor meets it any more. Before a factor is picked, the open prompt
-      // closes and the flight ends as sign-in required; after, the ceremony
-      // finishes and each waiter's replay reports it.
+      // No factor meets it any more. While the prompt is open the flight ends
+      // with that reason: an unanswered prompt is closed here, and an answer
+      // that arrives (a factor picked but not yet submitted included) is
+      // discarded before any commit. A ceremony already past its answer
+      // finishes, and each waiter's replay reports the outcome.
       if (this.state === 'collecting' && this.selected === null) {
         this.openPrompt?.onClosed?.();
         this.closeOpenPrompt?.();

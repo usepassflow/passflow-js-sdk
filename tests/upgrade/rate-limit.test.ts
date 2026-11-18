@@ -4,7 +4,18 @@ import { classifyUpgradeError } from '../../lib/upgrade/errors';
 /** A raw AxiosError as the hosted rounds reject on a 429 from the verify limiter. */
 const rateLimited = (headers: Record<string, string> = { 'retry-after': '120' }) =>
   Object.assign(new Error('Request failed with status code 429'), {
-    response: { status: 429, headers, data: { error: 'Too many verification attempts. Try again later.' } },
+    response: {
+      status: 429,
+      headers,
+      data: {
+        error: {
+          id: 'error.2fa.rate_limit_exceeded',
+          message: 'Too many attempts. Please try again later.',
+          status: 429,
+          time: '2026-11-19T00:00:00Z',
+        },
+      },
+    },
   });
 
 describe('a 429 on either step-up round', () => {
@@ -17,9 +28,51 @@ describe('a 429 on either step-up round', () => {
       expect(error.retryable).toBe(false);
       expect(error.status).toBe(429);
       expect(error.retryAfter).toBe(120);
-      expect(error.message).toBe('Too many verification attempts. Try again later.');
+      expect(error.message).toBe('Too many attempts. Please try again later.');
+      expect(error.errorId).toBe('error.2fa.rate_limit_exceeded');
     },
   );
+
+  test('the plain-text body older servers send is still a rate limit, with Retry-After from the header', () => {
+    const error = classifyUpgradeError(
+      Object.assign(new Error('Request failed with status code 429'), {
+        response: {
+          status: 429,
+          headers: { 'retry-after': '60' },
+          data: { error: 'localized error: error.2fa.rate_limit_exceeded. Details: [].' },
+        },
+      }),
+      'refresh',
+    );
+
+    expect(error.kind).toBe('rate_limited');
+    expect(error.retryable).toBe(false);
+    expect(error.retryAfter).toBe(60);
+  });
+
+  test('a 503 from an unavailable limiter store is a server error, not a rate limit', () => {
+    const error = classifyUpgradeError(
+      Object.assign(new Error('Request failed with status code 503'), {
+        response: {
+          status: 503,
+          headers: {},
+          data: { error: { id: 'error.rate_limit.unavailable', message: 'Service unavailable.', status: 503 } },
+        },
+      }),
+      'refresh',
+    );
+
+    const plain503 = classifyUpgradeError(
+      Object.assign(new Error('Request failed with status code 503'), {
+        response: { status: 503, headers: {}, data: {} },
+      }),
+      'refresh',
+    );
+    expect(error.kind).not.toBe('rate_limited');
+    expect(error.kind).toBe(plain503.kind);
+    expect(error.retryable).toBe(plain503.retryable);
+    expect(error.status).toBe(503);
+  });
 
   test('without a usable Retry-After, retryAfter is absent and the message falls back to the default', () => {
     const error = classifyUpgradeError(

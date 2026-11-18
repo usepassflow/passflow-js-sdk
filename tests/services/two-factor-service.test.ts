@@ -477,7 +477,7 @@ describe('TwoFactorService', () => {
       // Given: User has failed 5 attempts
       const error = new PassflowError({
         id: 'TOO_MANY_ATTEMPTS',
-        message: 'Too many failed attempts. Try again in 15 minutes.',
+        message: 'Too many attempts. Please try again later.',
         status: 429,
         location: 'two-factor-service.test.ts',
         time: new Date().toISOString(),

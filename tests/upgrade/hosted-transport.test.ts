@@ -334,4 +334,33 @@ describe('hosted upgrade cookie-only transport', () => {
       disable();
     }
   });
+
+  test('an acr-only proof is remembered only briefly: the same requirement prompts again after a minute', async () => {
+    const f = start();
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const aal2 = { status: 403, acrValues: '2', requiredLevel: 2 };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      now.mockReturnValue(1_000_000 + 30_000);
+      await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 16 * 60_000);
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+    } finally {
+      disable();
+    }
+  });
 });

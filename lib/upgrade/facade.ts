@@ -328,16 +328,23 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
    * to hand back an elevation that belongs to a different session than the
    * challenge did.
    */
+  /** How long a proof counts against the same requirement coming back. */
+  const PROOF_MEMORY_MS = 60_000;
   /** The challenge this page last proved and when, under `stopRepeatedElevation`. */
   let lastProven: { challenge: UpgradeChallenge; at: number } | undefined;
   deps.stopRepeatedElevation?.subscribe(() => {
     lastProven = undefined;
   });
 
-  /** Whether `challenge` is met by the last proof: not stronger, and its `max_age` has not run out since. */
+  /**
+   * Whether `challenge` is met by the last proof: not stronger, and proved within the
+   * last minute (or within its `max_age`, if shorter). A refused proof loops straight
+   * away; later, the server's elevation may simply have lapsed, and a new step-up is due.
+   */
   const alreadyProven = (challenge: UpgradeChallenge): UpgradeChallenge | undefined => {
     if (!lastProven || isStrictlyStronger(lastProven.challenge, challenge)) return undefined;
-    if (challenge.maxAge !== undefined && Date.now() - lastProven.at > challenge.maxAge * 1000) return undefined;
+    const lifetime = Math.min(PROOF_MEMORY_MS, challenge.maxAge !== undefined ? challenge.maxAge * 1000 : PROOF_MEMORY_MS);
+    if (Date.now() - lastProven.at > lifetime) return undefined;
     return lastProven.challenge;
   };
 

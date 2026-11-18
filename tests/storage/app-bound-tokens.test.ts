@@ -122,6 +122,37 @@ describe("clearing never removes another app's session", () => {
     expect(a.getDeliveryMode()).toBe(TokenDeliveryMode.Cookie);
   });
 
+  test("apps split by keyStoragePrefix: A's sign-out clears A's keys while B's cookie-mode ID token stays", () => {
+    const storage = new FakeStorage();
+    const b = new StorageManager({ storage, prefix: 'b', appId: 'app-b' });
+    b.saveTokens(tokensFor(['app-b']), TokenDeliveryMode.Cookie);
+    const a = new StorageManager({ storage, prefix: 'a', appId: 'app-a' });
+    a.saveTokens(tokensFor(['app-a']));
+
+    a.deleteTokens();
+
+    expect(new StorageManager({ storage, prefix: 'a', appId: 'app-a' }).getTokens()).toBeUndefined();
+    expect(new StorageManager({ storage, prefix: 'a', appId: 'app-a' }).hasJsonModeTokens()).toBe(false);
+    expect(b.getIdToken()).toBeDefined();
+  });
+
+  test("mixed keys: A's sign-out clears A's tokens while B's id token stays", () => {
+    const storage = new FakeStorage();
+    const b = new StorageManager({ storage, appId: 'app-b' });
+    const bTokens = tokensFor(['app-b']);
+    b.saveTokens({ id_token: bTokens.id_token });
+    const a = new StorageManager({ storage, appId: 'app-a' });
+    const aTokens = tokensFor(['app-a']);
+    a.saveTokens({ access_token: aTokens.access_token, refresh_token: aTokens.refresh_token, scopes: ['id'] });
+
+    a.deleteTokens();
+
+    expect(storage.getItem('access')).toBeNull();
+    expect(storage.getItem('refresh')).toBeNull();
+    expect(storage.getItem('tokens_scopes')).toBeNull();
+    expect(storage.getItem('id_token')).toBe(bTokens.id_token);
+  });
+
   test("this app's session is cleared as before", () => {
     const storage = new FakeStorage();
     const a = new StorageManager({ storage, appId: 'app-a' });

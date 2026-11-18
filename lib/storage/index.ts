@@ -77,22 +77,37 @@ export class StorageManager {
     return this.ownToken(this.storage.getItem(key));
   }
 
-  /**
-   * Whether the stored session is another app's: a stored token that reads as absent here. Its
-   * tokens, ID token, CSRF token, scopes, delivery mode and hosted sign-in record are that app's,
-   * so this instance's clearing leaves them in place.
-   */
-  private holdsOtherAppSession(): boolean {
-    if (!this.appId) return false;
+  /** The keys a stored token lives in: the JSON tokens and the cookie-mode ID token. */
+  private tokenValueKeys(): string[] {
     return [
       this.getKeyForTokenType(TokenType.access_token),
       this.getKeyForTokenType(TokenType.refresh_token),
       this.getKeyForTokenType(TokenType.id_token),
       this.ID_TOKEN_KEY,
-    ].some((key) => {
-      const value = this.storage.getItem(key);
-      return !!value && this.ownToken(value) === undefined;
-    });
+    ];
+  }
+
+  /** Whether `key` holds a token issued for another app: this instance leaves it in place. */
+  private holdsOtherAppToken(key: string): boolean {
+    if (!this.appId) return false;
+    const value = this.storage.getItem(key);
+    return !!value && this.ownToken(value) === undefined;
+  }
+
+  /**
+   * Whether the stored session is only another app's: some key holds another app's token and none
+   * holds this app's. The keys every session shares (scopes, delivery mode, CSRF token) are then
+   * that app's, and this instance's clearing leaves them in place.
+   */
+  private holdsOnlyOtherAppSession(): boolean {
+    if (!this.appId) return false;
+    const keys = this.tokenValueKeys();
+    return keys.some((key) => this.holdsOtherAppToken(key)) && !keys.some((key) => !!this.readToken(key));
+  }
+
+  /** Removes the token in `key` unless it is another app's. */
+  private removeOwnToken(key: string): void {
+    if (!this.holdsOtherAppToken(key)) this.storage.removeItem(key);
   }
 
   /**
@@ -176,21 +191,27 @@ export class StorageManager {
     this.storage.removeItem(key);
   }
 
+  /**
+   * Clears this app's stored session, key by key: a key holding another app's token stays. The
+   * keys every session shares (scopes, delivery mode, CSRF token) stay only when the stored session
+   * is another app's alone, and the hosted sign-in record only when another app wrote it.
+   */
   deleteTokens(): void {
-    if (this.holdsOtherAppSession()) return;
-    // Clear JSON mode tokens
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.id_token));
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.access_token));
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.refresh_token));
-    this.storage.removeItem(this.scopes);
+    // Decided before anything is removed: afterwards none of this app's tokens is left to tell.
+    const keepShared = this.holdsOnlyOtherAppSession();
 
-    // Clear cookie mode ID token
-    this.clearIdToken();
+    // Clear JSON mode tokens and the cookie mode ID token
+    for (const key of this.tokenValueKeys()) this.removeOwnToken(key);
 
-    // Clear delivery mode and CSRF token to ensure clean state for next session
-    this.clearDeliveryMode();
-    this.clearCsrfToken();
-    this.storage.removeItem(this.hostedSignInKey());
+    if (!keepShared) {
+      // Clear scopes, delivery mode and CSRF token to ensure clean state for next session
+      this.storage.removeItem(this.scopes);
+      this.clearDeliveryMode();
+      this.removeCsrfToken();
+    }
+    if (!this.appId || this.getHostedSignIn() !== undefined || !this.storage.getItem(this.hostedSignInKey())) {
+      this.storage.removeItem(this.hostedSignInKey());
+    }
   }
 
   /**
@@ -324,8 +345,7 @@ export class StorageManager {
    */
   clearIdToken(): void {
     try {
-      if (this.holdsOtherAppSession()) return;
-      this.storage.removeItem(this.ID_TOKEN_KEY);
+      this.removeOwnToken(this.ID_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -360,8 +380,13 @@ export class StorageManager {
    * Clear the CSRF token from storage
    */
   clearCsrfToken(): void {
+    // Another app's session alone in storage: the CSRF token is that app's.
+    if (this.holdsOnlyOtherAppSession()) return;
+    this.removeCsrfToken();
+  }
+
+  private removeCsrfToken(): void {
     try {
-      if (this.holdsOtherAppSession()) return;
       this.storage.removeItem(this.CSRF_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors

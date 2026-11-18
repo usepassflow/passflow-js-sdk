@@ -153,6 +153,21 @@ describe("clearing never removes another app's session", () => {
     expect(storage.getItem('id_token')).toBe(bTokens.id_token);
   });
 
+  test("A's sign-out over B's full session clears A's tokens, with B's id token left behind", () => {
+    const storage = new FakeStorage();
+    new StorageManager({ storage, appId: 'app-b' }).saveTokens(tokensFor(['app-b']));
+    const a = new StorageManager({ storage, appId: 'app-a' });
+    const own = tokensFor(['app-a']);
+    a.saveTokens({ access_token: own.access_token, refresh_token: own.refresh_token, scopes: ['id'] });
+    expect(a.getTokens()?.access_token).toBe(own.access_token);
+
+    a.deleteTokens();
+    a.clearIdToken();
+    a.clearCsrfToken();
+
+    expect(a.getTokens()).toBeUndefined();
+  });
+
   test("this app's session is cleared as before", () => {
     const storage = new FakeStorage();
     const a = new StorageManager({ storage, appId: 'app-a' });

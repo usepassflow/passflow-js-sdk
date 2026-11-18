@@ -45,6 +45,17 @@ describe("another app's session on the same origin", () => {
     expect(new StorageManager({ storage: localStorage, prefix: 'b', appId: 'app-b' }).getIdToken()).toBe(bId);
   });
 
+  test('a prefixed app signs out although another app wrote the shared cookie-mode id token after its sign-in', async () => {
+    const a = new Passflow({ ...TEST_CONFIG, keyStoragePrefix: 'a' });
+    a.setTokens(VALID_TOKENS);
+    expect(a.isAuthenticated()).toBe(true);
+    localStorage.setItem('passflow_id_token', idTokenFor('another-app'));
+
+    await a.logOut();
+
+    expect(new Passflow({ ...TEST_CONFIG, keyStoragePrefix: 'a' }).isAuthenticated()).toBe(false);
+  });
+
   test("mixed keys: A's logOut signs A out while B's id token stays", async () => {
     const bId = idTokenFor('app-b');
     localStorage.setItem('id_token', bId);

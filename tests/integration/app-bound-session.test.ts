@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 import { Passflow } from '../../lib/passflow';
 import { StorageManager } from '../../lib/storage';
+import { TokenDeliveryMode } from '../../lib/types';
 import { TEST_CONFIG, VALID_TOKENS } from '../helpers/fixtures';
 
 const b64 = (value: unknown): string => btoa(JSON.stringify(value)).replace(/=+$/, '');
@@ -67,6 +68,36 @@ describe("another app's session on the same origin", () => {
     expect(new Passflow(TEST_CONFIG).isAuthenticated()).toBe(false);
     expect(localStorage.getItem('access')).toBeNull();
     expect(localStorage.getItem('id_token')).toBe(bId);
+  });
+
+  const storeCookieSessionOfB = () => {
+    const b = new StorageManager({ storage: localStorage, appId: 'app-b' });
+    b.setDeliveryMode(TokenDeliveryMode.Cookie);
+    b.saveTokens({ id_token: idTokenFor('app-b') }, TokenDeliveryMode.Cookie);
+    b.setCsrfToken('csrf-b');
+    localStorage.setItem('passflow_session_state', 'valid');
+    return b;
+  };
+
+  test("A's logOut leaves B's cookie-mode session signed in", async () => {
+    // Only app B's cookie-mode session is stored; app A (TEST_CONFIG) holds nothing.
+    const b = storeCookieSessionOfB();
+
+    await new Passflow(TEST_CONFIG).logOut();
+
+    expect(b.getIdToken()).toBeDefined();
+    expect(b.getCsrfToken()).toBe('csrf-b');
+    expect(b.getDeliveryMode()).toBe(TokenDeliveryMode.Cookie);
+    expect(localStorage.getItem('passflow_session_state')).toBe('valid');
+  });
+
+  test("an instance created while only B's cookie-mode session is stored leaves B's session state alone", async () => {
+    storeCookieSessionOfB();
+
+    const a = new Passflow(TEST_CONFIG);
+    await a.restoreSession();
+
+    expect(localStorage.getItem('passflow_session_state')).toBe('valid');
   });
 
   test('setAppId to another app drops the session the instance holds', async () => {

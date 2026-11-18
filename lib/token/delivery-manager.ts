@@ -146,12 +146,14 @@ export class TokenDeliveryManager {
   }
 
   /**
-   * Reset delivery manager to initial state
+   * Reset delivery manager to initial state. With `keepStored`, only the in-memory state is reset:
+   * the stored mode and session state belong to another app's session and stay.
    */
-  reset(): void {
+  reset(keepStored = false): void {
     this.mode = TokenDeliveryMode.JsonBody;
     this.sessionState = SessionState.Unknown;
     this.isInitializedFlag = false;
+    if (keepStored) return;
     this.clearPersistedMode();
     this.clearPersistedSessionState();
   }

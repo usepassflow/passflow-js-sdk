@@ -145,6 +145,7 @@ describe('AuthService', () => {
       getTokens: vi.fn().mockReturnValue(mockTokens),
       getToken: vi.fn().mockReturnValue(mockTokens.refresh_token),
       deleteTokens: vi.fn(),
+      holdsOnlyOtherAppSession: vi.fn().mockReturnValue(false),
       getDeviceId: vi.fn().mockReturnValue(mockDeviceId),
       clearIdToken: vi.fn(),
       clearCsrfToken: vi.fn(),

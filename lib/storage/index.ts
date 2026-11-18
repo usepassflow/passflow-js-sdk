@@ -99,7 +99,7 @@ export class StorageManager {
    * holds this app's. The keys every session shares (scopes, delivery mode, CSRF token) are then
    * that app's, and this instance's clearing leaves them in place.
    */
-  private holdsOnlyOtherAppSession(): boolean {
+  holdsOnlyOtherAppSession(): boolean {
     if (!this.appId) return false;
     const keys = this.tokenValueKeys();
     return keys.some((key) => this.holdsOtherAppToken(key)) && !keys.some((key) => !!this.readToken(key));

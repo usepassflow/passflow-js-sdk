@@ -274,6 +274,10 @@ export class AuthService {
    * @returns true if session is valid, false otherwise
    */
   async restoreSession(): Promise<boolean> {
+    // The stored cookie or BFF session is another app's: nothing of this app's to check, and the
+    // shared session state is that app's.
+    if (this.storageManager.holdsOnlyOtherAppSession()) return false;
+
     // BFF mode: validate session with BFF endpoint
     if (this.tokenDeliveryManager.isBFFMode() && this.tokenExchangeConfig?.statusUrl) {
       try {
@@ -1268,10 +1272,12 @@ export class AuthService {
 
   /** Deletes every local trace of the session (both delivery modes) and clears the token cache. */
   private clearLocalSession(): void {
+    // Decided before anything is removed: another app's session alone keeps its delivery mode and state.
+    const otherAppSession = this.storageManager.holdsOnlyOtherAppSession();
     this.storageManager.deleteTokens();
     this.storageManager.clearIdToken();
     this.storageManager.clearCsrfToken();
-    this.tokenDeliveryManager.reset();
+    this.tokenDeliveryManager.reset(otherAppSession);
     this.tokenCacheService.setTokensCache(undefined);
     this.tokenCacheService.stopTokenCheck?.();
   }

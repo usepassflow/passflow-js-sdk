@@ -278,10 +278,10 @@ export class UpgradeCancelledError extends Error {
 }
 
 /**
- * Raised when the server's `available_factors` is empty: no factor can meet the
- * challenge, only a fresh sign-in can (`prompt=login`, `max_age=0`, or no factor
- * the user has reaches the level). Sign the user in again, for example with
- * `authRedirect()`.
+ * Raised when only a fresh sign-in can meet the challenge (`sign_in_required: true`,
+ * for `prompt=login` or `max_age=0`; from an older server, an empty
+ * `available_factors`). Sign the user in again, for example with `authRedirect()`
+ * in an embedded app.
  */
 export class UpgradeSignInRequiredError extends Error {
   readonly code = 'upgrade_sign_in_required' as const;
@@ -292,9 +292,27 @@ export class UpgradeSignInRequiredError extends Error {
   }
 }
 
-/** Whether the server said that only a fresh sign-in can meet this challenge. */
+/**
+ * Whether the server said that only a fresh sign-in can meet this challenge:
+ * `sign_in_required: true`, or, from a server that does not send that field, an
+ * empty `available_factors`.
+ */
 export const requiresSignIn = (challenge: UpgradeChallenge | null | undefined): boolean =>
-  challenge?.availableFactors?.length === 0;
+  challenge?.signInRequired === true || (challenge?.signInRequired === undefined && challenge?.availableFactors?.length === 0);
+
+/** Whether the server said a step-up could meet this challenge, but this account has no factor that reaches it. */
+export const noFactorReachesLevel = (challenge: UpgradeChallenge | null | undefined): boolean =>
+  challenge?.signInRequired === false && challenge.availableFactors?.length === 0;
+
+const NO_FACTOR_REACHES_LEVEL =
+  'This account has no factor that reaches the required level (it may need a device-bound passkey)';
+
+/** The terminal reason a flight ends with when the server says no factor can meet the requirement. */
+export const unmeetableReason = (challenge: UpgradeChallenge | null | undefined): Error | undefined => {
+  if (requiresSignIn(challenge)) return new UpgradeSignInRequiredError();
+  if (noFactorReachesLevel(challenge)) return new UpgradeUnsatisfiableError(NO_FACTOR_REACHES_LEVEL);
+  return undefined;
+};
 
 /** Raised when no registered factor can satisfy the challenge. */
 export class UpgradeUnsatisfiableError extends Error {
@@ -416,8 +434,10 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
         : Math.min(current.maxAge, incoming.maxAge);
 
   const channels = Array.from(new Set([...(current.channels ?? []), ...(incoming.channels ?? [])]));
-  // The user's factors do not depend on the bar: the newest list the server sent stands.
-  const availableFactors = incoming.availableFactors ?? current.availableFactors;
+  // The user's factors do not depend on the bar: the newest list the server sent stands, with the
+  // sign_in_required that came with it.
+  const listFrom = incoming.availableFactors ? incoming : current;
+  const { availableFactors, signInRequired } = listFrom;
 
   return {
     acrValues,
@@ -426,6 +446,7 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
     status: current.status,
     ...(channels.length > 0 ? { channels } : {}),
     ...(availableFactors ? { availableFactors } : {}),
+    ...(signInRequired !== undefined ? { signInRequired } : {}),
   };
 };
 
@@ -594,7 +615,7 @@ export class UpgradeController {
     const stronger = isStrictlyStronger(current, incoming);
     this.requirement = mergeChallenges(current, incoming);
 
-    if (requiresSignIn(this.requirement)) {
+    if (unmeetableReason(this.requirement)) {
       // No factor meets it any more. Before a factor is picked, the open prompt
       // closes and the flight ends as sign-in required; after, the ceremony
       // finishes and each waiter's replay reports it.
@@ -873,8 +894,9 @@ export class UpgradeController {
     let previousError: Error | undefined;
 
     for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
-      if (requiresSignIn(this.requirement)) {
-        return { status: 'failed', reason: new UpgradeSignInRequiredError() };
+      const unmeetable = unmeetableReason(this.requirement);
+      if (unmeetable) {
+        return { status: 'failed', reason: unmeetable };
       }
       const factors = this.offeredFactors();
       if (factors.length === 0) {
@@ -904,8 +926,9 @@ export class UpgradeController {
         return { status: 'failed', reason: new UpgradeCancelledError(e) };
       }
 
-      if (requiresSignIn(this.requirement)) {
-        return { status: 'failed', reason: new UpgradeSignInRequiredError() };
+      const unmeetableNow = unmeetableReason(this.requirement);
+      if (unmeetableNow) {
+        return { status: 'failed', reason: unmeetableNow };
       }
       if (answer.type === 'cancel') {
         return { status: 'failed', reason: new UpgradeCancelledError() };

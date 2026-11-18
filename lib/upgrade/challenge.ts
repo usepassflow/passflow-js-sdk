@@ -62,6 +62,13 @@ export type UpgradeChallenge = {
    */
   availableFactors?: UpgradeFactorType[];
   /**
+   * The `403` body's `sign_in_required`: `true` when only a fresh sign-in can meet
+   * the challenge, `false` when a step-up could but `availableFactors` names none
+   * this account has (for example a device-bound passkey for AAL3). Absent from
+   * older servers.
+   */
+  signInRequired?: boolean;
+  /**
    * Every channel that PARSED AS A CHALLENGE in any field — not only the
    * channels that won a comparison. An opaque header contributes no constraint
    * yet must still be counted, because only something that saw and discarded it
@@ -193,6 +200,7 @@ export const parseChallengeBody = (body: unknown, status: number): UpgradeChalle
     maxAge: maxAgeValue(data.max_age),
     status,
     ...(availableFactors ? { availableFactors } : {}),
+    ...(typeof data.sign_in_required === 'boolean' ? { signInRequired: data.sign_in_required } : {}),
   };
 };
 
@@ -448,6 +456,7 @@ export const readUpgradeChallenge = (input: ChallengeInput, options?: ChallengeR
       status,
       channels: channels.map((reading) => reading.channel),
       ...(bodyChallenge?.availableFactors ? { availableFactors: bodyChallenge.availableFactors } : {}),
+      ...(bodyChallenge?.signInRequired !== undefined ? { signInRequired: bodyChallenge.signInRequired } : {}),
     },
     diagnostics,
   };

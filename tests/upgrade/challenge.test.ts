@@ -105,6 +105,18 @@ describe('parseChallengeBody', () => {
     expect(parseChallengeBody({ error: 'upgrade_required' }, 403)).not.toHaveProperty('availableFactors');
   });
 
+  test('reads sign_in_required when it is a boolean, and leaves it out otherwise', () => {
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: true }, 403)?.signInRequired).toBe(true);
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: false }, 403)?.signInRequired).toBe(false);
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: 'yes' }, 403)).not.toHaveProperty(
+      'signInRequired',
+    );
+    expect(
+      parseUpgradeChallenge(403, () => undefined, { error: 'upgrade_required', available_factors: [], sign_in_required: false })
+        ?.signInRequired,
+    ).toBe(false);
+  });
+
   test('parseUpgradeChallenge carries available_factors from the 403 body', () => {
     const challenge = parseUpgradeChallenge(403, () => undefined, {
       error: 'upgrade_required',

@@ -730,13 +730,19 @@ switch (enrollment) {
   absent from the answer.
 - **Step-up offers what the server lists.** The step-up 403 from `/auth/session/exchange` carries
   `available_factors`, the factors this user can step up with, and the SDK offers exactly those in
-  that order. Without it (older servers), TOTP is suggested before passkey. An empty list means only
-  a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`, or no factor of the user's
-  reaches the level): no prompt opens, an open prompt is closed (its `onClosed` is called), and the
-  step-up rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
-  true). Sign the user in again: an embedded app can call `authRedirect()`; the hosted login page
-  shows its own sign-in form instead. `UpgradeUnsatisfiableError`
-  means the server listed only factors this SDK cannot complete.
+  that order. Without it (older servers), TOTP is suggested before passkey. When the list is empty,
+  no prompt opens and an open prompt is closed (its `onClosed` is called). The body's
+  `sign_in_required` says why:
+  - `true`: only a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`). The step-up
+    rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
+    true). Sign the user in again: an embedded app can call `authRedirect()`; the hosted login page
+    shows its own sign-in form instead.
+  - `false`: a step-up could meet it, but this account has no factor that reaches the level (for
+    example AAL3 needs a device-bound passkey). The step-up rejects with `UpgradeUnsatisfiableError`;
+    signing in again will not help.
+  - absent (older servers): an empty list counts as `true`.
+
+  `UpgradeUnsatisfiableError` also means the server listed only factors this SDK cannot complete.
 - **A hosted step-up is proved once per requirement.** `passflow.hostedUpgrade` remembers the
   challenge it last proved on this page. An `elevate()` with a challenge that is not strictly
   stronger (a higher level or a shorter `max_age`) rejects with `UpgradeInsufficientError`, with no

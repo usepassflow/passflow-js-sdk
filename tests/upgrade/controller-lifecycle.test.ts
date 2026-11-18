@@ -105,6 +105,90 @@ describe("the server's available_factors at step-up", () => {
     expect(f.driver.requests).toHaveLength(0);
   });
 
+  test('sign_in_required true settles as sign-in required', async () => {
+    const f = fixture();
+    await expect(
+      f.controller.elevate({ ...challenge(2), availableFactors: [], signInRequired: true }, request('a')),
+    ).rejects.toBeInstanceOf(UpgradeSignInRequiredError);
+    expect(f.driver.requests).toHaveLength(0);
+  });
+
+  test('an empty list with sign_in_required false is unsatisfiable: no factor of this account reaches the level', async () => {
+    const f = fixture();
+    const settled = await f.controller
+      .elevate({ ...challenge(3), availableFactors: [], signInRequired: false }, request('a'))
+      .catch((e: unknown) => e);
+
+    expect(settled).toBeInstanceOf(UpgradeUnsatisfiableError);
+    expect((settled as Error).message).toMatch(/no factor that reaches/);
+    expect(f.driver.requests).toHaveLength(0);
+  });
+
+  test('through fetch, an empty list with sign_in_required false is tagged unsatisfiable, not sign-in required', async () => {
+    const f = fixture();
+    const wrapped = upgradeFetch(
+      async () =>
+        new Response(
+          JSON.stringify({ error: 'upgrade_required', acr_values: '3', available_factors: [], sign_in_required: false }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+      options({ elevate: (c, w) => f.controller.elevate(c, w) }),
+    );
+
+    const settled = await wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+
+    expect(settled instanceof Response ? isUpgradeUnsatisfiable(settled) : settled instanceof UpgradeUnsatisfiableError).toBe(
+      true,
+    );
+    expect(settled instanceof Response && isUpgradeSignInRequired(settled)).toBe(false);
+  });
+
+  test('an empty list with sign_in_required false joining an open prompt closes it, never an empty chooser', async () => {
+    const f = fixture();
+    const a = f.controller.elevate({ ...challenge(2), availableFactors: ['totp'] }, request('a'));
+    await vi.waitFor(() => expect(f.driver.requests).toHaveLength(1));
+    const raised: unknown[] = [];
+    let closed = 0;
+    f.driver.requests[0]!.onRequirementRaised = (next) => raised.push(next);
+    f.driver.requests[0]!.onClosed = () => {
+      closed++;
+    };
+
+    const b = f.controller.elevate({ ...challenge(3), availableFactors: [], signInRequired: false }, request('b'));
+
+    await expect(a).rejects.toBeInstanceOf(UpgradeUnsatisfiableError);
+    await expect(b).rejects.toBeInstanceOf(UpgradeUnsatisfiableError);
+    expect(closed).toBe(1);
+    expect(raised).toHaveLength(0);
+  });
+
+  test('a replay answered with an empty list and sign_in_required false settles as unsatisfiable, not insufficient', async () => {
+    const f = fixture();
+    const responses = [
+      challengeResponse(403),
+      new Response(
+        JSON.stringify({ error: 'upgrade_required', acr_values: '3', available_factors: [], sign_in_required: false }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
+    ];
+    let sent = 0;
+    const wrapped = upgradeFetch(
+      async () => responses[sent++]!,
+      options({ elevate: (c, w) => f.controller.elevate(c, w), readObtainedBar: () => ({ level: 2, acrValues: '2' }) }),
+    );
+
+    const result = wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+    await vi.waitFor(() => expect(f.driver.requests).toHaveLength(1));
+    f.driver.select(0, 'totp');
+    f.driver.submit(0, 'totp');
+    const settled = await result;
+
+    expect(sent).toBe(2);
+    expect(settled instanceof Response ? isUpgradeUnsatisfiable(settled) : settled instanceof UpgradeUnsatisfiableError).toBe(
+      true,
+    );
+  });
+
   test('a list naming only factors this SDK cannot complete is still unsatisfiable', async () => {
     const f = fixture();
     await expect(f.controller.elevate({ ...challenge(2), availableFactors: ['sms_otp'] }, request('a'))).rejects.toBeInstanceOf(

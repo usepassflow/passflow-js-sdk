@@ -35,11 +35,13 @@ import {
 } from './challenge';
 import {
   barOf,
+  noFactorReachesLevel,
   requiresSignIn,
   UpgradeCancelledError,
   type UpgradeElevation,
   UpgradeSignInRequiredError,
   UpgradeUnsatisfiableError,
+  unmeetableReason,
   type Waiter,
 } from './controller';
 import { UpgradeInsufficientError, UpgradeSessionChangedError, UpgradeTransportError, UpgradeUnavailableError } from './errors';
@@ -247,7 +249,7 @@ export type CoreOutcome =
   | { kind: 'insufficient'; obtained: AssuranceBar; required: AssuranceBar; response?: ChallengeContext }
   | { kind: 'cancelled' }
   | { kind: 'exhausted'; error: Error }
-  | { kind: 'unsatisfiable' }
+  | { kind: 'unsatisfiable'; error?: Error; response?: ChallengeContext }
   /** Only a fresh sign-in can meet the challenge: the server listed no factor (`available_factors: []`). */
   | { kind: 'sign-in-required'; response?: ChallengeContext }
   | { kind: 'unavailable' }
@@ -480,7 +482,7 @@ const classifyFailure = (e: unknown, obtained: AssuranceBar | undefined): CoreOu
     return { kind: 'sign-in-required' };
   }
   if (e instanceof UpgradeUnsatisfiableError) {
-    return { kind: 'unsatisfiable' };
+    return { kind: 'unsatisfiable', error: e };
   }
   if (e instanceof UpgradeUnavailableError) {
     return { kind: 'unavailable' };
@@ -549,6 +551,9 @@ const classifyReplay = async (
 
   if (requiresSignIn(challenge)) {
     return { kind: 'sign-in-required', response: replayed };
+  }
+  if (noFactorReachesLevel(challenge)) {
+    return { kind: 'unsatisfiable', error: unmeetableReason(challenge), response: replayed };
   }
 
   const required = barOf(challenge);
@@ -859,7 +864,7 @@ export const coreOutcomeToError = (outcome: CoreOutcome): Error | undefined => {
     case 'cancelled':
       return new UpgradeCancelledError();
     case 'unsatisfiable':
-      return new UpgradeUnsatisfiableError();
+      return outcome.error ?? new UpgradeUnsatisfiableError();
     case 'sign-in-required':
       return new UpgradeSignInRequiredError();
     case 'unavailable':
@@ -923,6 +928,7 @@ export const settleFetchOutcome = <T extends object>(
       return options.onCancel === 'reject'
         ? { settle: 'reject', error: new UpgradeCancelledError() }
         : { settle: 'resolve', value: tagUpgradeOutcome(original, outcome) };
+    case 'unsatisfiable':
     case 'sign-in-required':
       // After a replay, the second challenge is the response that refused the operation.
       return { settle: 'resolve', value: tagUpgradeOutcome((outcome.response?.raw as T) ?? original, outcome) };

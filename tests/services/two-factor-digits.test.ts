@@ -44,6 +44,20 @@ describe('TOTP digit count', () => {
     expect(JSON.parse(verifyCalls()[0]?.data as string)).toEqual({ code: '12345678' });
   });
 
+  test('a count learned on an abandoned sign-in does not carry over to the next one', async () => {
+    const { service, verifyCalls } = setup({ enrollment: 'verify', totp_digits: 8, totp_period: 30 });
+    await service.getEnrollment();
+    expect(service.getTotpDigits()).toBe(8);
+
+    // The user goes back and signs in again: a new second-factor step starts, nothing was cleared.
+    service.setPartialAuthState('', '', 'another.tfa.token');
+    expect(service.getTotpDigits()).toBe(6);
+    await service.verify('123456');
+
+    expect(verifyCalls()).toHaveLength(1);
+    expect(JSON.parse(verifyCalls()[0]?.data as string)).toEqual({ code: '123456' });
+  });
+
   test('a count learned on one sign-in is gone once it is cleared', async () => {
     const { service, verifyCalls } = setup({ enrollment: 'verify', totp_digits: 8, totp_period: 30 });
     await service.getEnrollment();

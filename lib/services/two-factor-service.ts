@@ -437,6 +437,8 @@ export class TwoFactorService {
    * Called internally via event listener when AuthService emits TwoFactorRequired
    */
   setPartialAuthState(email?: string, challengeId?: string, tfaToken?: string): void {
+    // A new second-factor step: the digit count of an earlier, abandoned one does not apply.
+    this.totpDigits = undefined;
     this.partialAuthState = {
       email,
       challengeId,

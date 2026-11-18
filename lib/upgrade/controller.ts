@@ -109,6 +109,13 @@ export type UpgradePromptRequest = {
    * degraded, never silent.
    */
   onRequirementRaised?: (next: { challenge: UpgradeChallenge; factors: readonly UpgradeFactor[] }) => void;
+  /**
+   * Called when the controller closes an OPEN prompt itself: a joining challenge
+   * whose `availableFactors` is empty means only a fresh sign-in can meet it, so
+   * the flight ends with `UpgradeSignInRequiredError` and the prompt's answer is
+   * no longer read. A prompt subscribes the same way as to `onRequirementRaised`.
+   */
+  onClosed?: () => void;
 };
 
 /** The user's answer to an upgrade prompt. */
@@ -270,6 +277,25 @@ export class UpgradeCancelledError extends Error {
   }
 }
 
+/**
+ * Raised when the server's `available_factors` is empty: no factor can meet the
+ * challenge, only a fresh sign-in can (`prompt=login`, `max_age=0`, or no factor
+ * the user has reaches the level). Sign the user in again, for example with
+ * `authRedirect()`.
+ */
+export class UpgradeSignInRequiredError extends Error {
+  readonly code = 'upgrade_sign_in_required' as const;
+
+  constructor(message = 'Only a fresh sign-in can meet this challenge') {
+    super(message);
+    this.name = 'UpgradeSignInRequiredError';
+  }
+}
+
+/** Whether the server said that only a fresh sign-in can meet this challenge. */
+export const requiresSignIn = (challenge: UpgradeChallenge | null | undefined): boolean =>
+  challenge?.availableFactors?.length === 0;
+
 /** Raised when no registered factor can satisfy the challenge. */
 export class UpgradeUnsatisfiableError extends Error {
   readonly code = 'upgrade_unsatisfiable' as const;
@@ -419,6 +445,8 @@ export class UpgradeController {
   private readonly platform: PlatformAdapter;
   private readonly registry: Map<UpgradeFactorType, UpgradeFactor>;
   private readonly available: readonly UpgradeFactor[];
+  /** Ends the open prompt's race in `collect`; set only while a prompt is open. */
+  private closeOpenPrompt?: () => void;
   private readonly maxAttempts: number;
   private readonly readObtainedBar?: () => AssuranceBar | undefined;
   private readonly onFlightSettled?: (summary: UpgradeFlightSummary) => void;
@@ -565,6 +593,17 @@ export class UpgradeController {
 
     const stronger = isStrictlyStronger(current, incoming);
     this.requirement = mergeChallenges(current, incoming);
+
+    if (requiresSignIn(this.requirement)) {
+      // No factor meets it any more. Before a factor is picked, the open prompt
+      // closes and the flight ends as sign-in required; after, the ceremony
+      // finishes and each waiter's replay reports it.
+      if (this.state === 'collecting' && this.selected === null) {
+        this.openPrompt?.onClosed?.();
+        this.closeOpenPrompt?.();
+      }
+      return;
+    }
 
     if (!stronger) {
       // Branch 1 — the common case: two guards on one screen demanding the same
@@ -834,6 +873,9 @@ export class UpgradeController {
     let previousError: Error | undefined;
 
     for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+      if (requiresSignIn(this.requirement)) {
+        return { status: 'failed', reason: new UpgradeSignInRequiredError() };
+      }
       const factors = this.offeredFactors();
       if (factors.length === 0) {
         // Reachable without any enrolment knowledge: a caller-supplied `factors`
@@ -862,6 +904,9 @@ export class UpgradeController {
         return { status: 'failed', reason: new UpgradeCancelledError(e) };
       }
 
+      if (requiresSignIn(this.requirement)) {
+        return { status: 'failed', reason: new UpgradeSignInRequiredError() };
+      }
       if (answer.type === 'cancel') {
         return { status: 'failed', reason: new UpgradeCancelledError() };
       }
@@ -946,7 +991,13 @@ export class UpgradeController {
     // synchronously, so the object is kept rather than the function: branch 2
     // reads the slot at the moment it needs it.
     this.openPrompt = request;
-    return this.prompt(request);
+    // `join` closes the prompt by settling this race; the prompt's own answer is then not read.
+    const closed = new Promise<UpgradePromptResult>((resolve) => {
+      this.closeOpenPrompt = () => resolve({ type: 'cancel' });
+    });
+    return Promise.race([this.prompt(request), closed]).finally(() => {
+      this.closeOpenPrompt = undefined;
+    });
   }
 
   /** Maps a proof failure to a terminal reason, or `undefined` when the user may retry. */

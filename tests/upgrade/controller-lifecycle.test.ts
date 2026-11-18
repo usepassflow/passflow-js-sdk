@@ -2,8 +2,19 @@
 import { describe, expect, test, vi } from 'vitest';
 import type { AssuranceBar } from '../../lib/upgrade/challenge';
 import type { UpgradeFlightSummary } from '../../lib/upgrade/controller';
-import { barMeets, mergeChallenges, UpgradeController, UpgradeUnsatisfiableError } from '../../lib/upgrade/controller';
-import { isUpgradeExhausted, isUpgradeInsufficient, isUpgradeUnsatisfiable } from '../../lib/upgrade/core';
+import {
+  barMeets,
+  mergeChallenges,
+  UpgradeController,
+  UpgradeSignInRequiredError,
+  UpgradeUnsatisfiableError,
+} from '../../lib/upgrade/controller';
+import {
+  isUpgradeExhausted,
+  isUpgradeInsufficient,
+  isUpgradeSignInRequired,
+  isUpgradeUnsatisfiable,
+} from '../../lib/upgrade/core';
 import { classifyUpgradeError, UpgradeInsufficientError, UpgradeTransportError } from '../../lib/upgrade/errors';
 import { createUpgradeFacade } from '../../lib/upgrade/facade';
 import { upgradeFetch } from '../../lib/upgrade/fetch-adapter';
@@ -57,16 +68,19 @@ describe("the server's available_factors at step-up", () => {
     await pending.catch(() => undefined);
   });
 
-  test('an empty list opens no prompt, sends the request once and settles as unsatisfiable', async () => {
+  const emptyListResponse = () =>
+    new Response(JSON.stringify({ error: 'upgrade_required', acr_values: '2', available_factors: [] }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  test('an empty list opens no prompt, sends the request once and settles as sign-in required', async () => {
     const f = fixture();
     let sent = 0;
     const wrapped = upgradeFetch(
       async () => {
         sent++;
-        return new Response(JSON.stringify({ error: 'upgrade_required', acr_values: '2', available_factors: [] }), {
-          status: 403,
-          headers: { 'content-type': 'application/json' },
-        });
+        return emptyListResponse();
       },
       options({ elevate: (c, w) => f.controller.elevate(c, w) }),
     );
@@ -75,11 +89,69 @@ describe("the server's available_factors at step-up", () => {
 
     expect(f.driver.requests).toHaveLength(0);
     expect(sent).toBe(1);
-    expect(settled instanceof Response ? isUpgradeUnsatisfiable(settled) : settled instanceof UpgradeUnsatisfiableError).toBe(
+    expect(settled instanceof Response ? isUpgradeSignInRequired(settled) : settled instanceof UpgradeSignInRequiredError).toBe(
       true,
     );
+    expect(settled instanceof Response && isUpgradeUnsatisfiable(settled)).toBe(false);
     await vi.waitFor(() => expect(f.controller.currentState).toBe('idle'));
     expect(f.summaries).toHaveLength(1);
+  });
+
+  test('an imperative elevation with an empty list rejects with UpgradeSignInRequiredError and no prompt', async () => {
+    const f = fixture();
+    await expect(f.controller.elevate({ ...challenge(2), availableFactors: [] }, request('a'))).rejects.toMatchObject({
+      code: 'upgrade_sign_in_required',
+    });
+    expect(f.driver.requests).toHaveLength(0);
+  });
+
+  test('a list naming only factors this SDK cannot complete is still unsatisfiable', async () => {
+    const f = fixture();
+    await expect(f.controller.elevate({ ...challenge(2), availableFactors: ['sms_otp'] }, request('a'))).rejects.toBeInstanceOf(
+      UpgradeUnsatisfiableError,
+    );
+  });
+
+  test('an empty list joining an open prompt closes it and settles every waiter as sign-in required', async () => {
+    const f = fixture();
+    const a = f.controller.elevate({ ...challenge(2), availableFactors: ['totp', 'recovery_codes'] }, request('a'));
+    await vi.waitFor(() => expect(f.driver.requests).toHaveLength(1));
+    const raised: { factors: readonly unknown[] }[] = [];
+    let closed = 0;
+    f.driver.requests[0]!.onRequirementRaised = (next) => raised.push(next);
+    f.driver.requests[0]!.onClosed = () => {
+      closed++;
+    };
+
+    const b = f.controller.elevate({ ...challenge(3), availableFactors: [] }, request('b'));
+
+    await expect(a).rejects.toBeInstanceOf(UpgradeSignInRequiredError);
+    await expect(b).rejects.toBeInstanceOf(UpgradeSignInRequiredError);
+    expect(closed).toBe(1);
+    expect(raised).toHaveLength(0);
+    expect(f.commits).toHaveLength(0);
+    await vi.waitFor(() => expect(f.controller.currentState).toBe('idle'));
+  });
+
+  test('a replay answered with an empty list settles as sign-in required, not insufficient', async () => {
+    const f = fixture();
+    const responses = [challengeResponse(403), emptyListResponse()];
+    let sent = 0;
+    const wrapped = upgradeFetch(
+      async () => responses[sent++]!,
+      options({ elevate: (c, w) => f.controller.elevate(c, w), readObtainedBar: () => ({ level: 2, acrValues: '2' }) }),
+    );
+
+    const result = wrapped('https://app.example/auth/session/exchange').catch((e: unknown) => e);
+    await vi.waitFor(() => expect(f.driver.requests).toHaveLength(1));
+    f.driver.select(0, 'totp');
+    f.driver.submit(0, 'totp');
+    const settled = await result;
+
+    expect(sent).toBe(2);
+    expect(settled instanceof Response ? isUpgradeSignInRequired(settled) : settled instanceof UpgradeSignInRequiredError).toBe(
+      true,
+    );
   });
 
   test('a factor that passes, then the same 403 again, stops as insufficient with no second prompt or replay', async () => {

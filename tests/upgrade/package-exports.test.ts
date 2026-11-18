@@ -258,9 +258,9 @@ describe.skipIf(!distIsBuilt)('the built package serves both entry conditions', 
 
   test('both entries export the step-up outcome errors and their guards', () => {
     const probe =
-      'const kinds = ["UpgradeUnsatisfiableError", "isUpgradeUnsatisfiable", "UpgradeInsufficientError", "isUpgradeInsufficient"].map((n) => typeof m[n]);' +
+      'const kinds = ["UpgradeUnsatisfiableError", "isUpgradeUnsatisfiable", "UpgradeInsufficientError", "isUpgradeInsufficient", "UpgradeSignInRequiredError", "isUpgradeSignInRequired"].map((n) => typeof m[n]);' +
       ' const e = new m.UpgradeUnsatisfiableError(); console.log(JSON.stringify([kinds, e.code, m.isUpgradeUnsatisfiable({})]));';
-    const expected = [['function', 'function', 'function', 'function'], 'upgrade_unsatisfiable', false];
+    const expected = [['function', 'function', 'function', 'function', 'function', 'function'], 'upgrade_unsatisfiable', false];
 
     expect(JSON.parse(runNode(`const m = require("@passflow/core"); ${probe}`))).toEqual(expected);
     expect(JSON.parse(runNode(`import("@passflow/core").then((m) => { ${probe} });`, true))).toEqual(expected);

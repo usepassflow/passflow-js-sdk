@@ -188,7 +188,7 @@ export class UpgradeTransportError extends Error {
 
 /**
  * Every literal `code` an upgrade error class carries, including the two that
- * live in `controller.ts` (`upgrade_cancelled`, `upgrade_unsatisfiable`).
+ * live in `controller.ts` (`upgrade_cancelled`, `upgrade_unsatisfiable`, `upgrade_sign_in_required`).
  *
  * The codes are listed rather than imported because this module imports nothing
  * — `controller.ts` imports it, so naming those classes here would be a cycle —
@@ -203,6 +203,7 @@ const UPGRADE_ERROR_CODES: readonly string[] = Object.freeze([
   'upgrade_session_changed',
   'upgrade_cancelled',
   'upgrade_unsatisfiable',
+  'upgrade_sign_in_required',
 ]);
 
 /**

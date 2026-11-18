@@ -730,10 +730,11 @@ switch (enrollment) {
 - **Step-up offers what the server lists.** The step-up 403 from `/auth/session/exchange` carries
   `available_factors`, the factors this user can step up with, and the SDK offers exactly those in
   that order. Without it (older servers), TOTP is suggested before passkey. An empty list means only
-  a fresh sign-in can meet the requirement (for example `prompt=login` or an expired `max_age`): no
-  prompt opens, the step-up rejects with `UpgradeUnsatisfiableError` (on a response,
-  `isUpgradeUnsatisfiable(res)` is true), and the app signs the user in again, for example with
-  `authRedirect()`.
+  a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`, or no factor of the user's
+  reaches the level): no prompt opens, an open prompt is closed (its `onClosed` is called), and the
+  step-up rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
+  true). Sign the user in again, for example with `authRedirect()`. `UpgradeUnsatisfiableError`
+  means the server listed only factors this SDK cannot complete.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,

@@ -307,6 +307,8 @@ export class Passflow {
       canCommit: () => ({ ok: true }),
       readSessionPin: () => undefined,
       readObtainedBar: () => undefined,
+      // The bar reached is unreadable here, so a repeat of a proved challenge is refused instead.
+      stopRepeatedElevation: { subscribe: (listener) => this.subscribeToSessionChange(listener) },
       markSessionInvalid: () => {
         // A failed hosted commit is about the cookie session; the token session stays as it is.
       },

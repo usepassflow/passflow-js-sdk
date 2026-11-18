@@ -430,7 +430,7 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
 };
 
 /** Is `incoming` STRICTLY stronger than `current` on either axis? */
-const isStrictlyStronger = (current: UpgradeChallenge, incoming: UpgradeChallenge): boolean => {
+export const isStrictlyStronger = (current: UpgradeChallenge, incoming: UpgradeChallenge): boolean => {
   const acrRose =
     incoming.requiredLevel !== undefined &&
     (current.requiredLevel === undefined || incoming.requiredLevel > current.requiredLevel);

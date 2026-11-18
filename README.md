@@ -735,6 +735,11 @@ switch (enrollment) {
   step-up rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
   true). Sign the user in again, for example with `authRedirect()`. `UpgradeUnsatisfiableError`
   means the server listed only factors this SDK cannot complete.
+- **A hosted step-up is proved once per requirement.** `passflow.hostedUpgrade` remembers the
+  challenge it last proved on this page. An `elevate()` with a challenge that is not strictly
+  stronger (a higher level or a shorter `max_age`) rejects with `UpgradeInsufficientError`, with no
+  prompt and no request: the server refused a proof that met it, so prompting again would loop. Sign
+  the user in again instead. A sign-in or sign-out clears it.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,

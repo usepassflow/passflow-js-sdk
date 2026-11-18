@@ -48,6 +48,8 @@ describe('a 429 on either step-up round', () => {
     expect(error.kind).toBe('rate_limited');
     expect(error.retryable).toBe(false);
     expect(error.retryAfter).toBe(60);
+    // That text is the server's internal error string, not one to show a user.
+    expect(error.message).toBe('Too many requests. Try again later.');
   });
 
   test('a 503 from an unavailable limiter store is a server error, not a rate limit', () => {

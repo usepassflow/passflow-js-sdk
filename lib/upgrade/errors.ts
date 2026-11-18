@@ -243,7 +243,10 @@ type ErrorFacts = {
 const plainErrorText = (data: unknown): string | undefined => {
   const error = (data as { error?: unknown } | undefined)?.error;
   const text = typeof error === 'string' ? error : (error as { message?: unknown } | undefined)?.message;
-  return typeof text === 'string' && text ? text : undefined;
+  // Older servers' rate limiter sends its internal error string ("localized error: <id>. Details: …"),
+  // which is not for a user to read; the default message stands in for it.
+  if (typeof text !== 'string' || !text || text.startsWith('localized error:')) return undefined;
+  return text;
 };
 
 /** `Retry-After` in seconds, when it is a non-negative integer. */

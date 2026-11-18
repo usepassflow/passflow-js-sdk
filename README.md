@@ -63,8 +63,8 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
 
 **Known limits:**
 - The `hostedUpgrade` memory assumes the app's elevation window (`auth_assurance.elevation_max_age`)
-  is at least 10 seconds. Servers up to src/v0.49.1 accept any window; the next server release after
-  it refuses new windows under 10 seconds but keeps a shorter one already stored. With a window under
+  is at least 10 seconds. Servers up to src/v0.49.1 accept any window; from src/v0.50.0 the server
+  refuses new windows under 10 seconds but keeps a shorter one already stored. With a window under
   10 seconds, a re-challenge for the same requirement within 10 seconds of the proof is refused with
   `UpgradeInsufficientError`, costing the user one extra sign-in. Keep every window at 10 seconds or
   more, and re-save any shorter one.
@@ -829,7 +829,7 @@ switch (enrollment) {
   requirement's `max_age`, if shorter): after that the same requirement prompts again. A sign-in or
   sign-out clears it. Keep the app's elevation window (`auth_assurance.elevation_max_age`) at 10
   seconds or more: a shorter window can lapse inside those 10 seconds, and the re-challenge is then
-  refused, costing one extra sign-in. The server release after src/v0.49.1 refuses new windows under
+  refused, costing one extra sign-in. From src/v0.50.0 the server refuses new windows under
   10 seconds; re-save any shorter one already stored.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.

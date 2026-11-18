@@ -62,6 +62,7 @@ export const createMockStorageManager = (): MockStorageManager => ({
   getTokens: vi.fn(),
   getToken: vi.fn(),
   deleteTokens: vi.fn(),
+  holdsOnlyOtherAppSession: vi.fn().mockReturnValue(false),
   getDeviceId: vi.fn().mockReturnValue('mock-device-id'),
 });
 

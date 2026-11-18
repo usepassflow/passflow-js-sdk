@@ -160,6 +160,17 @@ const simpleSignOut = async () => {
 };
 ```
 
+After a hosted sign-in (`authRedirect()`), `logOut()` also ends the hosted login's own session.
+Otherwise the next hosted sign-in would go through with no password. Once the local sign-out and
+its `SignOut` event have run, the page leaves for the server's `/oidc/end_session`, which returns
+the browser to `postLogoutRedirectUri`. By default that is the address the hosted sign-in landed
+on, and it must match one of the app's registered redirect URLs. Code after `await logOut()` may
+not run then. A sign-in made in the app itself never navigates.
+
+```javascript
+await passflow.logOut({ postLogoutRedirectUri: "https://app.example.com/signed-out" });
+```
+
 ### Quick Passwordless Authentication
 
 ```javascript
@@ -665,10 +676,12 @@ expired or spent code throws a `PassflowError` with an `error.otp.*` id, and an 
 throws `error.not.found`. To send a fresh code, call the original method again; the new step has a
 new `challenge_id`.
 
-- **Register or SignIn.** `verifyEmailCode` emits `Register` for a challenge this `Passflow`
-  instance got from `signUp`, and `SignIn` for one from `signIn` or `resetPassword`. Challenges are
-  remembered in memory only, so a code entered in another tab, after a reload, or on a recreated
-  instance emits `SignIn`, even for a sign-up. It emits no `SignInStart` or `RegisterStart`.
+- **Register or SignIn.** `verifyEmailCode` emits `Register` then `SignIn` for a challenge this
+  `Passflow` instance got from `signUp`, and `SignIn` alone for one from `signIn` or
+  `resetPassword`. Challenges are remembered in memory only, so a code entered in another tab, after
+  a reload, or on a recreated instance emits `SignIn` alone, even for a sign-up. `verifyEmailCode`
+  emits no `SignInStart` or `RegisterStart`. `signUp` and `passkeyRegister` that sign the user in at
+  once also emit `Register` then `SignIn`.
 - **No `challenge_id`.** The code budget is spent and the server emailed a link instead. There is
   nothing to call: show `message` and let the user follow the link.
 - **Password reset.** `resetPassword(newPassword, scopes?, resetToken?)` takes the reset token as
@@ -681,7 +694,8 @@ A `required` app answers every sign-in with a `tfa_token`, also for a user who h
 Ask the server what this sign-in can do next before asking for a code:
 
 ```typescript
-switch (await passflow.getTwoFactorEnrollment()) {
+const { enrollment } = await passflow.getTwoFactorEnrollment();
+switch (enrollment) {
   case "verify": // the user has a factor
     await passflow.verifyTwoFactor(code);
     break;
@@ -699,6 +713,47 @@ switch (await passflow.getTwoFactorEnrollment()) {
 }
 ```
 
+- **Trusted devices.** `device_trust_available` on the enrolment and on a v2 challenge says whether
+  to offer "trust this device" (`trust_device`) on this sign-in. Older servers leave it out: absent
+  means unknown, so hide the option only when it is `false`.
+- **TOTP digits.** Read `getTwoFactorEnrollment()` before asking for the code. With a TOTP
+  enrolment it answers `totp_digits` (6 or 8) and `totp_period`, as does `requestChallenge`: size the
+  code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until
+  an answer gives the count, `verifyTwoFactor` accepts 6 or 8 digits and the server decides. The
+  count lasts one sign-in.
+- **Recovery codes** are 12 characters by default, issued as `XXXX-XXXX-XXXX`; apps choose 10–16
+  (only 12 is grouped with dashes). The server issues recovery codes
+  on every enrolment; `recovery_codes` on confirm is optional only so an older or different server
+  that omits it doesn't break the type. Older 8-character `XXXX-XXXX`
+  codes still work until they are regenerated. The SDK checks only the form (letters, digits and
+  optional dashes) and upper-cases the code; the server decides whether it is valid. `remaining_recovery_codes` may be
+  absent from the answer.
+- **Step-up offers what the server lists.** The step-up 403 from `/auth/session/exchange` carries
+  `available_factors`, the factors this user can step up with, and the SDK offers exactly those in
+  that order. Without it (older servers), TOTP is suggested before passkey. When the list is empty,
+  no prompt opens and an open prompt is closed (its `onClosed` is called). The body's
+  `sign_in_required` says why:
+  - `true`: only a fresh sign-in can meet the requirement (`prompt=login`, `max_age=0`). The step-up
+    rejects with `UpgradeSignInRequiredError` (on a response, `isUpgradeSignInRequired(res)` is
+    true). Sign the user in again: an embedded app can call `authRedirect()`; the hosted login page
+    shows its own sign-in form instead.
+  - `false`: a step-up could meet it, but this account has no factor that reaches the level (for
+    example AAL3 needs a device-bound passkey). The step-up rejects with `UpgradeUnsatisfiableError`;
+    signing in again will not help.
+  - absent (older servers): an empty list counts as `true`.
+
+  A requirement like this that joins an open step-up ends it for every waiter, including one whose
+  own requirement the open prompt could have met: they all settle with the same error.
+
+  `UpgradeUnsatisfiableError` also means the server listed only factors this SDK cannot complete.
+- **A hosted step-up is proved once per requirement.** `passflow.hostedUpgrade` remembers the
+  challenge it last proved on this page. An `elevate()` with a challenge that is not strictly
+  stronger (a higher level or a shorter `max_age`) rejects with `UpgradeInsufficientError`, with no
+  prompt and no request: the server refused a proof that met it, so prompting again would loop. Sign
+  the user in again instead. The proof counts for 10 seconds from its commit request (or the
+  requirement's `max_age`, if shorter): after that the same requirement prompts again. This relies on
+  the server rejecting an elevation window under 10 seconds, so a lapsed elevation is never
+  refused. A sign-in or sign-out clears it.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,
@@ -964,6 +1019,13 @@ try {
 }
 ```
 
+### Password change required
+
+A password sign-in for a user who must change the password first rejects with
+`PassflowPasswordChangeRequiredError` (a `PassflowError`, status 403, id
+`error.api.password.change.required`, exported as `PASSWORD_CHANGE_REQUIRED_ERROR_ID`). No token
+comes with it.
+
 ### Service unavailable
 
 In a browser, when the Passflow API cannot be reached or its gateway answers 502, 503 or 504 itself,
@@ -1024,7 +1086,7 @@ Configuration options:
 | `session({ createSession, expiredSession, doRefresh })`    | Set up session management              |
 | `signIn(payload)`                                          | Sign in with email/password            |
 | `signUp(payload)`                                          | Register a new user                    |
-| `logOut()`                                                 | Sign out the current user              |
+| `logOut(options?)`                                         | Sign out the current user              |
 | `passwordlessSignIn(payload)`                              | Start passwordless authentication      |
 | `passwordlessSignInComplete(payload)`                      | Complete passwordless authentication   |
 | `federatedAuthWithPopup(provider, redirectUrl, scopes)`    | Sign in with a provider using popup    |

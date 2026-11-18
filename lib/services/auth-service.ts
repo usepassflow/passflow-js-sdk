@@ -104,6 +104,16 @@ export type AuthRedirectOptions = {
   state?: string;
 };
 
+/** Options of `logOut()`. */
+export type LogOutOptions = {
+  /**
+   * After a hosted sign-in: where the hosted login sends the browser once its own session has
+   * ended. It must match one of the app's registered redirect URLs; an unmatched one leaves the
+   * user on the Passflow server's start page. Default: the address the hosted sign-in landed on.
+   */
+  postLogoutRedirectUri?: string;
+};
+
 /** How this instance's refresh controller coordinates (architecture §3.3, §3.4). */
 export type AuthServiceRefreshOptions = {
   coordination: ResolvedCoordination;
@@ -264,6 +274,10 @@ export class AuthService {
    * @returns true if session is valid, false otherwise
    */
   async restoreSession(): Promise<boolean> {
+    // The stored cookie or BFF session is another app's: nothing of this app's to check, and the
+    // shared session state is that app's.
+    if (this.storageManager.holdsOnlyOtherAppSession()) return false;
+
     // BFF mode: validate session with BFF endpoint
     if (this.tokenDeliveryManager.isBFFMode() && this.tokenExchangeConfig?.statusUrl) {
       try {
@@ -368,12 +382,19 @@ export class AuthService {
     }
   }
 
+  /** A registration that leaves the user signed in: `Register`, then `SignIn` with the same payload. */
+  private notifyRegisteredAndSignedIn(tokens: PassflowAuthorizationResponse): void {
+    const payload = { tokens, parsedTokens: this.tokenCacheService.getParsedTokens() };
+    this.subscribeStore.notify(PassflowEvent.Register, payload);
+    this.subscribeStore.notify(PassflowEvent.SignIn, payload);
+  }
+
   /**
    * Reports whether a sign-in response is still waiting on its second factor,
    * and when it is, hands the 2FA token on.
    *
    * Every sign-in path can end this way: the server answers with a
-   * `tfa_token` (or `requires_2fa`) in place of tokens. That response is not
+   * `tfa_token` in place of tokens. That response is not
    * a session, so on `true` the caller returns it as it is — without
    * `processAuthResponse`, a `SignIn`/`Register` event or a session check.
    * The `TwoFactorRequired` event is what the TwoFactorService listens to, so
@@ -382,12 +403,12 @@ export class AuthService {
    * the verifier stays here for `completePkceSignIn`, off the public event.
    */
   private handlePendingSecondFactor(
-    response: Pick<PassflowAuthorizationResponse, 'requires_2fa' | 'challenge_id' | 'tfa_token'>,
+    response: Pick<PassflowAuthorizationResponse, 'challenge_id' | 'tfa_token'>,
     email?: string,
     pkce?: Pick<PkcePair, 'verifier'>,
     scopes?: string[],
   ): boolean {
-    if (response.requires_2fa !== true && !response.tfa_token) {
+    if (!response.tfa_token) {
       return false;
     }
     if (pkce) {
@@ -639,6 +660,15 @@ export class AuthService {
     await this.processAuthResponse(response, response.scopes ?? this.readPendingPkce()?.scopes ?? this.scopes);
   }
 
+  /** Emits `SignIn` for a sign-in its second factor finished, then runs the session check. */
+  async notifySignedIn(tokens: Tokens): Promise<void> {
+    this.subscribeStore.notify(PassflowEvent.SignIn, {
+      tokens,
+      parsedTokens: this.tokenCacheService.getParsedTokens(),
+    });
+    await this.submitSessionCheck();
+  }
+
   /**
    * Forward tokens to BFF server for httpOnly cookie storage
    */
@@ -798,10 +828,7 @@ export class AuthService {
       }
 
       await this.processAuthResponse(response, payload.scopes);
-      this.subscribeStore.notify(PassflowEvent.Register, {
-        tokens: response,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      this.notifyRegisteredAndSignedIn(response);
       await this.submitSessionCheck();
       return response;
     } catch (error) {
@@ -1138,10 +1165,14 @@ export class AuthService {
       const response = answer.redirect_url ? { ...exchanged, redirect_url: answer.redirect_url } : exchanged;
       await this.processAuthResponse(response, scopes);
       this.forgetPkceSignIn();
-      this.subscribeStore.notify(challenge?.operation === 'sign-up' ? PassflowEvent.Register : PassflowEvent.SignIn, {
-        tokens: response,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      if (challenge?.operation === 'sign-up') {
+        this.notifyRegisteredAndSignedIn(response);
+      } else {
+        this.subscribeStore.notify(PassflowEvent.SignIn, {
+          tokens: response,
+          parsedTokens: this.tokenCacheService.getParsedTokens(),
+        });
+      }
       await this.submitSessionCheck();
       return response;
     } catch (error) {
@@ -1193,6 +1224,24 @@ export class AuthService {
     return userId;
   }
 
+  /**
+   * Where the page goes to end the hosted login's own session, when the stored session came from
+   * the hosted login; undefined otherwise. The hosted login keeps a session cookie on the Passflow
+   * host that only a top-level visit to `/oidc/end_session` can end. With the stored ID token as
+   * `id_token_hint` the server ends it at once and redirects to `post_logout_redirect_uri`, which
+   * must match one of the app's registered redirect URLs: by default the address the hosted
+   * sign-in landed on. Read before `logOut()`, which deletes what it is built from.
+   */
+  hostedEndSessionUrl(postLogoutRedirectUri?: string): string | undefined {
+    const landedOn = this.storageManager.getHostedSignIn();
+    if (!landedOn) return undefined;
+    const params: Record<string, string> = { post_logout_redirect_uri: postLogoutRedirectUri ?? landedOn };
+    if (this.appId) params.client_id = this.appId;
+    const idToken = this.storageManager.getToken(TokenType.id_token) ?? this.storageManager.getIdToken();
+    if (idToken) params.id_token_hint = idToken;
+    return `${this.url.replace(/\/+$/, '')}/oidc/end_session?${new URLSearchParams(params)}`;
+  }
+
   /** The logout API call. Server-side cleanup is best effort: every failure is ignored. */
   private async callLogoutApi(newestRefreshToken: string | undefined): Promise<void> {
     // BFF mode: call BFF logout endpoint to clear httpOnly cookies
@@ -1223,10 +1272,12 @@ export class AuthService {
 
   /** Deletes every local trace of the session (both delivery modes) and clears the token cache. */
   private clearLocalSession(): void {
+    // Decided before anything is removed: another app's session alone keeps its delivery mode and state.
+    const otherAppSession = this.storageManager.holdsOnlyOtherAppSession();
     this.storageManager.deleteTokens();
     this.storageManager.clearIdToken();
     this.storageManager.clearCsrfToken();
-    this.tokenDeliveryManager.reset();
+    this.tokenDeliveryManager.reset(otherAppSession);
     this.tokenCacheService.setTokensCache(undefined);
     this.tokenCacheService.stopTokenCheck?.();
   }
@@ -1564,10 +1615,7 @@ export class AuthService {
       }
 
       await this.processAuthResponse(responseRegisterComplete, payload.scopes);
-      this.subscribeStore.notify(PassflowEvent.Register, {
-        tokens: responseRegisterComplete,
-        parsedTokens: this.tokenCacheService.getParsedTokens(),
-      });
+      this.notifyRegisteredAndSignedIn(responseRegisterComplete);
       await this.submitSessionCheck();
       return responseRegisterComplete;
     } catch (error) {
@@ -1936,17 +1984,24 @@ export class AuthService {
           sanitizeErrorMessage(errorDescription || error || 'Sign in again.'),
         );
       }
-      return { tokens: await redeemOidcCode(this.url, code, read.slot), scopes: read.slot.scopes };
+      return {
+        tokens: await redeemOidcCode(this.url, code, read.slot),
+        scopes: read.slot.scopes,
+        returnUrl: read.slot.redirectUri,
+      };
     });
     return true;
   }
 
-  private async finishOidcLanding(redeem: () => Promise<{ tokens: Tokens; scopes: string[] }>): Promise<void> {
+  private async finishOidcLanding(
+    redeem: () => Promise<{ tokens: Tokens; scopes: string[]; returnUrl: string }>,
+  ): Promise<void> {
     try {
       // Every outcome comes after an await, so a subscriber attached right after this call sees it.
       await Promise.resolve();
-      const { tokens, scopes } = await redeem();
+      const { tokens, scopes, returnUrl } = await redeem();
       await this.processAuthResponse(tokens, scopes);
+      this.storageManager.setHostedSignIn(returnUrl);
       this.subscribeStore.notify(PassflowEvent.SignIn, {
         tokens,
         parsedTokens: this.tokenCacheService.getParsedTokens(),

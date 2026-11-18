@@ -77,7 +77,7 @@ describe('a new sign-in after the session ended refreshes at the next expiry (A1
   const signInWithSecondFactor = async (passflow: Passflow, method: Completion) => {
     await passflow.signIn({ email: 'b@example.com', password: 'pw' });
     if (method === 'verifyTwoFactor') await passflow.verifyTwoFactor('123456');
-    else await passflow.useTwoFactorRecoveryCode('ABCD-1234');
+    else await passflow.useTwoFactorRecoveryCode('ABCD-EFGH-JKMN');
   };
 
   const sentTokens = () => refreshToken.mock.calls.map((call: unknown[]) => call[0]);

@@ -43,9 +43,9 @@ describe('TwoFactorService — device trust', () => {
   });
 
   test('useRecoveryCode sends trust_device only with trustDevice: true', async () => {
-    await service.useRecoveryCode('ABCD-1234');
+    await service.useRecoveryCode('ABCD-EFGH-JKMN');
     store.notify(PassflowEvent.TwoFactorRequired, { email: '', challengeId: '', tfaToken: TFA_TOKEN });
-    await service.useRecoveryCode('ABCD-1234', { trustDevice: true });
+    await service.useRecoveryCode('ABCD-EFGH-JKMN', { trustDevice: true });
 
     expect(api.useRecoveryCode.mock.calls[0][0]).not.toHaveProperty('trust_device');
     expect(api.useRecoveryCode.mock.calls[1][0]).toMatchObject({ tfa_token: TFA_TOKEN, trust_device: true });

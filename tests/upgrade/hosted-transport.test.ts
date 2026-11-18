@@ -6,7 +6,8 @@ import { Passflow } from '../../lib/passflow';
 import { StorageManager } from '../../lib/storage';
 import { PassflowEvent } from '../../lib/store';
 import type { Tokens } from '../../lib/types';
-import { passkeyFactor } from '../../lib/upgrade/factors';
+import { UpgradeInsufficientError } from '../../lib/upgrade/errors';
+import { passkeyFactor, totpFactor } from '../../lib/upgrade/factors';
 import { EXPIRED_TOKENS, TEST_CONFIG, VALID_TOKENS } from '../helpers/fixtures';
 import { createMockPlatform } from '../helpers/mock-platform';
 
@@ -251,6 +252,142 @@ describe('hosted upgrade cookie-only transport', () => {
       expect(f.passflow.getCachedTokens()).toEqual(cachedBefore);
       expect(f.storage.getTokens()).toEqual(storedBefore);
       expect(f.events).toEqual([]);
+    } finally {
+      disable();
+    }
+  });
+
+  test('a hosted elevation that is not strictly stronger than the one just proved rejects with no prompt and no request', async () => {
+    const f = start();
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const aal2 = { status: 403, acrValues: '2', requiredLevel: 2 };
+    try {
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(1);
+      expect(f.sent.map((config) => config.url)).toEqual([COMMIT_PATH]);
+
+      // The exchange refused the proof with the same requirement: the page would loop.
+      await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      await expect(
+        f.passflow.hostedUpgrade.elevate({ ...aal2, acrValues: '1', requiredLevel: 1 }, { kind: 'imperative' }),
+      ).rejects.toBeInstanceOf(UpgradeInsufficientError);
+      expect(prompts).toBe(1);
+      expect(f.sent).toHaveLength(1);
+
+      // A strictly stronger requirement is a new step-up.
+      await f.passflow.hostedUpgrade.elevate({ ...aal2, maxAge: 0 }, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+      expect(f.sent).toHaveLength(2);
+
+      // A sign-out starts over.
+      await f.passflow.logOut();
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(3);
+
+      // So does a sign-in.
+      await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      f.passflow.setTokens(copyTokens(VALID_TOKENS));
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(4);
+    } finally {
+      disable();
+    }
+  });
+
+  test('a repeated max_age requirement prompts again once max_age seconds have passed since the proof', async () => {
+    const f = start();
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const fresh = { status: 403, acrValues: '2', requiredLevel: 2, maxAge: 5 };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
+      now.mockReturnValue(1_000_000 + 4_000);
+      await expect(f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 6_000);
+      await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+    } finally {
+      disable();
+    }
+  });
+
+  test('a level-only proof counts for 10 seconds: refused at 9 s, prompts again at 11 s', async () => {
+    const f = start();
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const aal2 = { status: 403, acrValues: '2', requiredLevel: 2 };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      now.mockReturnValue(1_000_000 + 9_000);
+      await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 11_000);
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+    } finally {
+      disable();
+    }
+  });
+
+  test('the proof time is taken when the commit request goes out, not when it answers', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const f = start(undefined, (config) => {
+      // The commit takes ten seconds to answer.
+      if (config.url === COMMIT_PATH) now.mockReturnValue(Date.now() + 10_000);
+      return hostedAnswer(config);
+    });
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const aal2 = { status: 403, acrValues: '2', requiredLevel: 2 };
+    try {
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 11_000);
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(2);
     } finally {
       disable();
     }

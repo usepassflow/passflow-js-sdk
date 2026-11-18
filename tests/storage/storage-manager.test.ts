@@ -86,8 +86,9 @@ describe('storage manager', () => {
 
       expect(getSpy).toHaveBeenCalledTimes(6);
       expect(setSpy).toHaveBeenCalledTimes(3);
-      // deleteTokens clears: 3 JSON tokens + scopes + cookie ID token + delivery mode + CSRF token = 7 removals
-      expect(removeSpy).toHaveBeenCalledTimes(7);
+      // deleteTokens clears: 3 JSON tokens + scopes + cookie ID token + delivery mode + CSRF token
+      // + the hosted sign-in record = 8 removals
+      expect(removeSpy).toHaveBeenCalledTimes(8);
     });
 
     test('delete one tokens', () => {

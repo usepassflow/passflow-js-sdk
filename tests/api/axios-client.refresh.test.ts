@@ -285,6 +285,32 @@ describe('AxiosClient pre-request refresh', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
+    // REGRESSION: a 401 on an authenticated call is sent once, never retried, and invalidates the session once
+    test('a 401 on an authenticated GET goes out once and rejects with a 401 PassflowError', async () => {
+      storage.saveTokens(pairExpiringIn(3600));
+      const spy = invalidations();
+      setAdapter((config) =>
+        Promise.reject(
+          new AxiosError('Request failed with status code 401', 'ERR_BAD_REQUEST', config, null, {
+            data: {
+              error: { id: 'error.api.token.invalid', message: 'Unauthorized', status: 401, time: '2026-11-18T00:00:00Z' },
+            },
+            status: 401,
+            statusText: '401',
+            headers: {},
+            config,
+          }),
+        ),
+      );
+
+      const outcome = await client.get('/user/me').catch((error: unknown) => error);
+
+      expect(sent).toHaveLength(1);
+      expect(outcome).toBeInstanceOf(PassflowError);
+      expect((outcome as PassflowError).status).toBe(401);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
     test('a 429 from /auth/refresh is not retried and reaches the caller raw', async () => {
       setAdapter(failWith(429, { 'retry-after': '0' }));
 

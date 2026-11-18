@@ -86,6 +86,47 @@ describe('parseChallengeBody', () => {
     expect(challenge).toMatchObject({ acrValues: undefined, maxAge: undefined, status: 403 });
   });
 
+  test('reads available_factors in the order the server lists them', () => {
+    const challenge = parseChallengeBody(
+      { error: 'upgrade_required', acr_values: '2', available_factors: ['totp', 'recovery_codes'] },
+      403,
+    );
+
+    expect(challenge?.availableFactors).toEqual(['totp', 'recovery_codes']);
+  });
+
+  test('drops non-string entries of available_factors and ignores a non-array value', () => {
+    expect(
+      parseChallengeBody({ error: 'upgrade_required', available_factors: ['totp', 7, null, 'passkey'] }, 403)?.availableFactors,
+    ).toEqual(['totp', 'passkey']);
+    expect(parseChallengeBody({ error: 'upgrade_required', available_factors: 'totp' }, 403)).not.toHaveProperty(
+      'availableFactors',
+    );
+    expect(parseChallengeBody({ error: 'upgrade_required' }, 403)).not.toHaveProperty('availableFactors');
+  });
+
+  test('reads sign_in_required when it is a boolean, and leaves it out otherwise', () => {
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: true }, 403)?.signInRequired).toBe(true);
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: false }, 403)?.signInRequired).toBe(false);
+    expect(parseChallengeBody({ error: 'upgrade_required', sign_in_required: 'yes' }, 403)).not.toHaveProperty(
+      'signInRequired',
+    );
+    expect(
+      parseUpgradeChallenge(403, () => undefined, { error: 'upgrade_required', available_factors: [], sign_in_required: false })
+        ?.signInRequired,
+    ).toBe(false);
+  });
+
+  test('parseUpgradeChallenge carries available_factors from the 403 body', () => {
+    const challenge = parseUpgradeChallenge(403, () => undefined, {
+      error: 'upgrade_required',
+      acr_values: '2',
+      available_factors: ['totp', 'recovery_codes'],
+    });
+
+    expect(challenge?.availableFactors).toEqual(['totp', 'recovery_codes']);
+  });
+
   test('ignores unrelated bodies', () => {
     expect(parseChallengeBody({ error: 'access_denied' }, 403)).toBeUndefined();
     expect(parseChallengeBody({}, 403)).toBeUndefined();

@@ -42,6 +42,9 @@ export enum PassflowEvent {
   TwoFactorSetupMagicLinkFailed = '2fa:magic_link_failed',
   TwoFactorChallengeReceived = 'two_factor_challenge_received',
   TwoFactorMethodSwitched = 'two_factor_method_switched',
+  /**
+   * @deprecated The server keeps device trust in a cookie and the SDK no longer emits this event.
+   */
   TwoFactorDeviceTrusted = 'two_factor_device_trusted',
   /** Token refresh entered a transient-failure episode (once per episode, per tab). */
   RefreshFailing = 'refresh:failing',
@@ -201,7 +204,8 @@ export type PassflowEventPayload = {
   [PassflowEvent.TwoFactorEnabled]: { recoveryCodes: string[]; clearRecoveryCodes: () => void };
   [PassflowEvent.TwoFactorDisabled]: Record<string, never>;
   [PassflowEvent.TwoFactorVerified]: { tokens?: Tokens };
-  [PassflowEvent.TwoFactorRecoveryUsed]: { tokens?: Tokens; remainingCodes: number };
+  /** `remainingCodes` is undefined when the server did not send the count. */
+  [PassflowEvent.TwoFactorRecoveryUsed]: { tokens?: Tokens; remainingCodes?: number };
   [PassflowEvent.TwoFactorRecoveryCodesLow]: { tokens?: Tokens; remainingCodes: number };
   [PassflowEvent.TwoFactorRecoveryCodesExhausted]: { tokens?: Tokens };
   [PassflowEvent.TwoFactorSetupMagicLinkValidated]: {

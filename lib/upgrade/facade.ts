@@ -46,6 +46,8 @@ import { readAcrValues } from './acr';
 import { type AxiosReissue, attachUpgradeAuth, createAxiosUpgradeHandler, type ResponseInterceptorHost } from './axios-adapter';
 import type { AssuranceBar, UpgradeChallenge, UpgradeDiagnosticSink } from './challenge';
 import {
+  barOf,
+  isStrictlyStronger,
   UpgradeController,
   type UpgradeElevation,
   type UpgradeFlightSummary,
@@ -54,7 +56,7 @@ import {
   type Waiter,
 } from './controller';
 import type { InterceptionScope, UpgradeInterceptorOptions } from './core';
-import { UpgradeSessionChangedError, UpgradeTransportError, UpgradeUnavailableError } from './errors';
+import { UpgradeInsufficientError, UpgradeSessionChangedError, UpgradeTransportError, UpgradeUnavailableError } from './errors';
 import type { UpgradeFactor } from './factors';
 import { upgradeFetch } from './fetch-adapter';
 import type { FetchLike, ReplayPolicy } from './replay';
@@ -104,6 +106,14 @@ export type UpgradeFacadeDeps = UpgradeTransportDeps & {
    * B's session (§13.4 revision 6 / H2).
    */
   readSessionPin?: () => UpgradeSessionPin | undefined;
+  /**
+   * Remember the challenge last proved and refuse, with `UpgradeInsufficientError`
+   * and no prompt or request, an elevation that is not strictly stronger. For a
+   * surface that cannot read the bar it reached (the hosted cookie session): a
+   * server that still refuses after a proof would otherwise be answered with
+   * prompt after prompt. `subscribe` clears the memory (sign-in, sign-out).
+   */
+  stopRepeatedElevation?: { subscribe: (listener: () => void) => () => void };
 };
 
 /**
@@ -262,6 +272,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       },
       commitRefresh: (upgrade) => {
         assertCurrent();
+        commitSentAt = Date.now();
         // The pin travels with the commit so the host can verify it at the
         // moment it APPLIES the rotated tokens. `assertCurrent` above is the
         // epoch half and runs first; the two are complementary — the epoch says
@@ -318,12 +329,47 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
    * to hand back an elevation that belongs to a different session than the
    * challenge did.
    */
+  /** When the latest commit request went out: the time a proof is remembered from. */
+  let commitSentAt: number | undefined;
+  /**
+   * How long a proof counts against the same requirement coming back. The server
+   * rejects an elevation window under 10 seconds, so no valid re-challenge falls
+   * inside it.
+   */
+  const PROOF_MEMORY_MS = 10_000;
+  /** The challenge this page last proved and when, under `stopRepeatedElevation`. */
+  let lastProven: { challenge: UpgradeChallenge; at: number } | undefined;
+  deps.stopRepeatedElevation?.subscribe(() => {
+    lastProven = undefined;
+  });
+
+  /**
+   * Whether `challenge` is met by the last proof: not stronger, and proved within the
+   * last 10 seconds (or within its `max_age`, if shorter). A refused proof loops straight
+   * away; later, the server's elevation may simply have lapsed, and a new step-up is due.
+   */
+  const alreadyProven = (challenge: UpgradeChallenge): UpgradeChallenge | undefined => {
+    if (!lastProven || isStrictlyStronger(lastProven.challenge, challenge)) return undefined;
+    const lifetime = Math.min(PROOF_MEMORY_MS, challenge.maxAge !== undefined ? challenge.maxAge * 1000 : PROOF_MEMORY_MS);
+    if (Date.now() - lastProven.at > lifetime) return undefined;
+    return lastProven.challenge;
+  };
+
   const elevateFor = async (challenge: UpgradeChallenge, waiter: Waiter): Promise<UpgradeElevation> => {
     const current = installation;
     if (!current) {
       // Nothing installed means no prompt and no way to ask the user, which is
       // exactly the `unavailable` row of the settlement table.
       throw new UpgradeUnavailableError('Step-up verification is not enabled on this Passflow instance');
+    }
+
+    const proven = deps.stopRepeatedElevation ? alreadyProven(challenge) : undefined;
+    if (proven) {
+      throw new UpgradeInsufficientError(
+        barOf(proven),
+        barOf(challenge),
+        'This requirement was already proved and the server still refused it: sign the user in again',
+      );
     }
 
     // Pin the flight to the principal it STARTS under. `active` is false only
@@ -345,6 +391,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       throw new UpgradeSessionChangedError();
     }
 
+    if (deps.stopRepeatedElevation) lastProven = { challenge, at: commitSentAt ?? Date.now() };
     return elevation;
   };
 

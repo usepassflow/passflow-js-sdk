@@ -35,7 +35,7 @@ import {
   type TwoFactorCompletionOptions,
   type TwoFactorConfirmResponse,
   type TwoFactorDisableResponse,
-  type TwoFactorEnrollment,
+  type TwoFactorEnrollmentResponse,
   type TwoFactorRecoveryResponse,
   type TwoFactorRegenerateResponse,
   type TwoFactorSetupLinkResponse,
@@ -60,6 +60,7 @@ import {
   type AuthRedirectOptions,
   AuthService,
   InvitationService,
+  type LogOutOptions,
   TenantService,
   TokenCacheService,
   TwoFactorService,
@@ -185,6 +186,7 @@ export class Passflow {
     this.storageManager = new StorageManager({
       prefix: config.keyStoragePrefix ?? '',
       storage: this.platform.storage,
+      appId,
     });
 
     // Initialize single DeviceService instance with shared StorageManager
@@ -225,9 +227,14 @@ export class Passflow {
       this.scopes,
       this.createTenantForNewUser,
       this.url,
+      // Read when a check runs: session() sets the callbacks after this constructor.
       {
-        createSession: this.createSessionCallback,
-        expiredSession: this.expiredSessionCallback,
+        createSession: async (session) => {
+          await this.createSessionCallback?.(session);
+        },
+        expiredSession: async () => {
+          await this.expiredSessionCallback?.();
+        },
       },
       this.appId ?? '',
       config.tokenExchange,
@@ -300,6 +307,8 @@ export class Passflow {
       canCommit: () => ({ ok: true }),
       readSessionPin: () => undefined,
       readObtainedBar: () => undefined,
+      // The bar reached is unreadable here, so a repeat of a proved challenge is refused instead.
+      stopRepeatedElevation: { subscribe: (listener) => this.subscribeToSessionChange(listener) },
       markSessionInvalid: () => {
         // A failed hosted commit is about the cookie session; the token session stays as it is.
       },
@@ -358,6 +367,7 @@ export class Passflow {
    */
   setAppId(appId: string): void {
     this.appId = appId;
+    this.storageManager.setAppId(appId);
     this.appSettingsRead = undefined;
 
     // Update all API clients
@@ -775,6 +785,7 @@ export class Passflow {
           // Clear any stored delivery mode to ensure consistent behavior
           this.storageManager.clearDeliveryMode();
           this.storageManager.saveTokens(tokens);
+          if (currentUrl) this.storageManager.setHostedSignIn(currentUrl.origin + currentUrl.pathname);
           this.tokenCacheService.setTokensCache(tokens);
           this.authService.refresh.sessionStarted();
         })
@@ -1287,6 +1298,14 @@ export class Passflow {
   /**
    * Sign out the current user and clear all tokens.
    *
+   * When the session came from the hosted login (`authRedirect()`, either mode), the page then
+   * leaves for the server's `/oidc/end_session`, which ends the hosted login's own session and
+   * sends the browser to `options.postLogoutRedirectUri`, by default the address the hosted
+   * sign-in landed on. Code after `await logOut()` may then not run. A sign-in made in the app
+   * itself never navigates.
+   *
+   * @param options.postLogoutRedirectUri - where to return after a hosted sign-out; must match one
+   * of the app's registered redirect URLs
    * @returns Promise that resolves when sign-out is complete
    * @throws {PassflowError} If sign-out request fails
    *
@@ -1301,14 +1320,21 @@ export class Passflow {
    * }
    * ```
    */
-  async logOut(): Promise<void> {
+  async logOut(options: LogOutOptions = {}): Promise<void> {
     try {
+      const endSessionUrl = this.authService.hostedEndSessionUrl(options.postLogoutRedirectUri);
       // Under the refresh lock: logs out the newest token, deletes storage, clears the cache.
       const userId = await this.authService.logOut();
-      this.twoFactorService.clearPartialAuthState();
-      // Exactly one SignOut, after the cache is cleared; also when the session had already ended.
-      this.notifySignedOut(userId);
-      await this.submitSessionCheck();
+      try {
+        this.twoFactorService.clearPartialAuthState();
+        // Exactly one SignOut, after the cache is cleared; also when the session had already ended.
+        this.notifySignedOut(userId);
+        await this.submitSessionCheck();
+      } finally {
+        // A hosted sign-in also left a session on the hosted login; only a visit there ends it.
+        // The record it is built from is already deleted, so it goes even when app code threw.
+        if (endSessionUrl) this.platform.navigateTo(endSessionUrl);
+      }
     } catch (error) {
       this.handleError(error, 'log-out', 'Log out');
     }
@@ -2154,12 +2180,14 @@ export class Passflow {
    * What the sign-in waiting on its second factor can do next. The server decides; read this
    * before asking for a code, and call `requestChallenge` only on `verify`.
    *
-   * @returns `verify`: ask for a code. `email_link`: `sendTwoFactorSetupLink`, then the user signs
-   * in again after enrolling. `direct`: `beginTwoFactorEnrollment`, `confirmTwoFactorEnrollment`,
-   * then `verifyTwoFactor`. `unavailable`: tell the user to contact the administrator.
+   * @returns The server's answer. Its `enrollment`: `verify`: ask for a code. `email_link`:
+   * `sendTwoFactorSetupLink`, then the user signs in again after enrolling. `direct`:
+   * `beginTwoFactorEnrollment`, `confirmTwoFactorEnrollment`, then `verifyTwoFactor`.
+   * `unavailable`: tell the user to contact the administrator. With a TOTP enrolment it also
+   * carries `totp_digits` (6 or 8) and `totp_period`; `verifyTwoFactor` then expects that many digits.
    * @throws {PassflowError} A 401 means the sign-in is over: sign in again.
    */
-  async getTwoFactorEnrollment(): Promise<TwoFactorEnrollment> {
+  async getTwoFactorEnrollment(): Promise<TwoFactorEnrollmentResponse> {
     try {
       return await this.twoFactorService.getEnrollment();
     } catch (error) {
@@ -2223,10 +2251,14 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * // After signIn returns requires_2fa: true
+   * // After signIn answers with a tfa_token
    * if (passflow.isTwoFactorVerificationRequired()) {
-   *   const response = await passflow.verifyTwoFactor('123456', { trustDevice: true });
-   *   console.log('Authentication complete', response.access_token);
+   *   const { enrollment, totp_digits = 6 } = await passflow.getTwoFactorEnrollment();
+   *   if (enrollment === 'verify') {
+   *     const code = await askForCode(totp_digits); // an input sized to the digit count
+   *     const response = await passflow.verifyTwoFactor(code, { trustDevice: true });
+   *     console.log('Authentication complete', response.access_token);
+   *   }
    * }
    * ```
    */
@@ -2257,10 +2289,12 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * // After signIn returns requires_2fa: true
-   * const result = await passflow.useTwoFactorRecoveryCode('ABCD-1234');
+   * // After signIn answers with a tfa_token
+   * const result = await passflow.useTwoFactorRecoveryCode('ABCD-EFGH-JKMN');
    * console.log('Authenticated with recovery code');
-   * console.log(`${result.remaining_recovery_codes} recovery codes remaining`);
+   * if (result.remaining_recovery_codes !== undefined) {
+   *   console.log(`${result.remaining_recovery_codes} recovery codes remaining`);
+   * }
    * ```
    */
   async useTwoFactorRecoveryCode(code: string, options?: TwoFactorCompletionOptions): Promise<TwoFactorRecoveryResponse> {

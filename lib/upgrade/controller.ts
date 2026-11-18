@@ -109,6 +109,13 @@ export type UpgradePromptRequest = {
    * degraded, never silent.
    */
   onRequirementRaised?: (next: { challenge: UpgradeChallenge; factors: readonly UpgradeFactor[] }) => void;
+  /**
+   * Called when the controller closes an OPEN prompt itself: a joining challenge
+   * whose `availableFactors` is empty means only a fresh sign-in can meet it, so
+   * the flight ends with `UpgradeSignInRequiredError` and the prompt's answer is
+   * no longer read. A prompt subscribes the same way as to `onRequirementRaised`.
+   */
+  onClosed?: () => void;
 };
 
 /** The user's answer to an upgrade prompt. */
@@ -270,6 +277,43 @@ export class UpgradeCancelledError extends Error {
   }
 }
 
+/**
+ * Raised when only a fresh sign-in can meet the challenge (`sign_in_required: true`,
+ * for `prompt=login` or `max_age=0`; from an older server, an empty
+ * `available_factors`). Sign the user in again, for example with `authRedirect()`
+ * in an embedded app.
+ */
+export class UpgradeSignInRequiredError extends Error {
+  readonly code = 'upgrade_sign_in_required' as const;
+
+  constructor(message = 'Only a fresh sign-in can meet this challenge') {
+    super(message);
+    this.name = 'UpgradeSignInRequiredError';
+  }
+}
+
+/**
+ * Whether the server said that only a fresh sign-in can meet this challenge:
+ * `sign_in_required: true`, or, from a server that does not send that field, an
+ * empty `available_factors`.
+ */
+export const requiresSignIn = (challenge: UpgradeChallenge | null | undefined): boolean =>
+  challenge?.signInRequired === true || (challenge?.signInRequired === undefined && challenge?.availableFactors?.length === 0);
+
+/** Whether the server said a step-up could meet this challenge, but this account has no factor that reaches it. */
+export const noFactorReachesLevel = (challenge: UpgradeChallenge | null | undefined): boolean =>
+  challenge?.signInRequired === false && challenge.availableFactors?.length === 0;
+
+const NO_FACTOR_REACHES_LEVEL =
+  'This account has no factor that reaches the required level (it may need a device-bound passkey)';
+
+/** The terminal reason a flight ends with when the server says no factor can meet the requirement. */
+export const unmeetableReason = (challenge: UpgradeChallenge | null | undefined): Error | undefined => {
+  if (requiresSignIn(challenge)) return new UpgradeSignInRequiredError();
+  if (noFactorReachesLevel(challenge)) return new UpgradeUnsatisfiableError(NO_FACTOR_REACHES_LEVEL);
+  return undefined;
+};
+
 /** Raised when no registered factor can satisfy the challenge. */
 export class UpgradeUnsatisfiableError extends Error {
   readonly code = 'upgrade_unsatisfiable' as const;
@@ -390,6 +434,12 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
         : Math.min(current.maxAge, incoming.maxAge);
 
   const channels = Array.from(new Set([...(current.channels ?? []), ...(incoming.channels ?? [])]));
+  // The server lists the factors that meet ITS requirement, so the list follows the requirement that
+  // set the bar, with the sign_in_required that came with it: a weaker joiner's list never replaces
+  // a stronger one's. Otherwise the newest list stands.
+  const incomingWeaker = isStrictlyStronger(incoming, current) && !isStrictlyStronger(current, incoming);
+  const listFrom = incomingWeaker || !incoming.availableFactors ? current : incoming;
+  const { availableFactors, signInRequired } = listFrom;
 
   return {
     acrValues,
@@ -397,11 +447,13 @@ export const mergeChallenges = (current: UpgradeChallenge, incoming: UpgradeChal
     maxAge,
     status: current.status,
     ...(channels.length > 0 ? { channels } : {}),
+    ...(availableFactors ? { availableFactors } : {}),
+    ...(signInRequired !== undefined ? { signInRequired } : {}),
   };
 };
 
 /** Is `incoming` STRICTLY stronger than `current` on either axis? */
-const isStrictlyStronger = (current: UpgradeChallenge, incoming: UpgradeChallenge): boolean => {
+export const isStrictlyStronger = (current: UpgradeChallenge, incoming: UpgradeChallenge): boolean => {
   const acrRose =
     incoming.requiredLevel !== undefined &&
     (current.requiredLevel === undefined || incoming.requiredLevel > current.requiredLevel);
@@ -416,6 +468,8 @@ export class UpgradeController {
   private readonly platform: PlatformAdapter;
   private readonly registry: Map<UpgradeFactorType, UpgradeFactor>;
   private readonly available: readonly UpgradeFactor[];
+  /** Ends the open prompt's race in `collect`; set only while a prompt is open. */
+  private closeOpenPrompt?: () => void;
   private readonly maxAttempts: number;
   private readonly readObtainedBar?: () => AssuranceBar | undefined;
   private readonly onFlightSettled?: (summary: UpgradeFlightSummary) => void;
@@ -562,6 +616,19 @@ export class UpgradeController {
 
     const stronger = isStrictlyStronger(current, incoming);
     this.requirement = mergeChallenges(current, incoming);
+
+    if (unmeetableReason(this.requirement)) {
+      // No factor meets it any more. While the prompt is open the flight ends
+      // with that reason: an unanswered prompt is closed here, and an answer
+      // that arrives (a factor picked but not yet submitted included) is
+      // discarded before any commit. A ceremony already past its answer
+      // finishes, and each waiter's replay reports the outcome.
+      if (this.state === 'collecting' && this.selected === null) {
+        this.openPrompt?.onClosed?.();
+        this.closeOpenPrompt?.();
+      }
+      return;
+    }
 
     if (!stronger) {
       // Branch 1 — the common case: two guards on one screen demanding the same
@@ -831,6 +898,10 @@ export class UpgradeController {
     let previousError: Error | undefined;
 
     for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+      const unmeetable = unmeetableReason(this.requirement);
+      if (unmeetable) {
+        return { status: 'failed', reason: unmeetable };
+      }
       const factors = this.offeredFactors();
       if (factors.length === 0) {
         // Reachable without any enrolment knowledge: a caller-supplied `factors`
@@ -859,6 +930,10 @@ export class UpgradeController {
         return { status: 'failed', reason: new UpgradeCancelledError(e) };
       }
 
+      const unmeetableNow = unmeetableReason(this.requirement);
+      if (unmeetableNow) {
+        return { status: 'failed', reason: unmeetableNow };
+      }
       if (answer.type === 'cancel') {
         return { status: 'failed', reason: new UpgradeCancelledError() };
       }
@@ -943,7 +1018,13 @@ export class UpgradeController {
     // synchronously, so the object is kept rather than the function: branch 2
     // reads the slot at the moment it needs it.
     this.openPrompt = request;
-    return this.prompt(request);
+    // `join` closes the prompt by settling this race; the prompt's own answer is then not read.
+    const closed = new Promise<UpgradePromptResult>((resolve) => {
+      this.closeOpenPrompt = () => resolve({ type: 'cancel' });
+    });
+    return Promise.race([this.prompt(request), closed]).finally(() => {
+      this.closeOpenPrompt = undefined;
+    });
   }
 
   /** Maps a proof failure to a terminal reason, or `undefined` when the user may retry. */
@@ -966,6 +1047,7 @@ export class UpgradeController {
           return new UpgradeUnavailableError(e.message);
         case 'exhausted':
         case 'attempts_exhausted':
+        case 'rate_limited':
         case 'fatal':
         case 'protocol':
         case 'network':

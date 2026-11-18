@@ -145,6 +145,7 @@ describe('AuthService', () => {
       getTokens: vi.fn().mockReturnValue(mockTokens),
       getToken: vi.fn().mockReturnValue(mockTokens.refresh_token),
       deleteTokens: vi.fn(),
+      holdsOnlyOtherAppSession: vi.fn().mockReturnValue(false),
       getDeviceId: vi.fn().mockReturnValue(mockDeviceId),
       clearIdToken: vi.fn(),
       clearCsrfToken: vi.fn(),
@@ -262,6 +263,20 @@ describe('AuthService', () => {
 
       expect(mockStorageManager.saveTokens).toHaveBeenCalledWith(mockAuthResponse, 'json_body');
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(PassflowEvent.Register, {
+        tokens: mockAuthResponse,
+        parsedTokens: mockParsedTokens,
+      });
+    });
+
+    // REGRESSION: a sign-up the server signs in at once emits Register, then SignIn
+    test('emits Register then SignIn when the register answer carries tokens', async () => {
+      await authService.signUp({ user: { email: 'test@example.com', password: 'password123' } });
+
+      const emitted = mockSubscribeStore.notify.mock.calls
+        .map((call) => call[0])
+        .filter((event) => event === PassflowEvent.Register || event === PassflowEvent.SignIn);
+      expect(emitted).toEqual([PassflowEvent.Register, PassflowEvent.SignIn]);
+      expect(mockSubscribeStore.notify).toHaveBeenCalledWith(PassflowEvent.SignIn, {
         tokens: mockAuthResponse,
         parsedTokens: mockParsedTokens,
       });
@@ -407,7 +422,7 @@ describe('AuthService', () => {
 
     test('should handle 2FA required response', async () => {
       const twoFaResponse = {
-        requires_2fa: true,
+        tfa_token: 'tfa-token-123',
         challenge_id: 'challenge-123',
       };
       mockAuthApi.signIn.mockResolvedValueOnce(twoFaResponse);
@@ -584,6 +599,20 @@ describe('AuthService', () => {
       expect(mockAuthApi.passkeyRegisterStart).toHaveBeenCalled();
       expect(mockAuthApi.passkeyRegisterComplete).toHaveBeenCalled();
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(PassflowEvent.Register, expect.any(Object));
+    });
+
+    // REGRESSION: a passkey registration signs in at once and emits Register, then SignIn
+    test('emits Register then SignIn', async () => {
+      await authService.passkeyRegister({
+        scopes: mockScopes,
+        relying_party_id: mockOrigin,
+        redirect_url: 'https://example.com/callback',
+      });
+
+      const emitted = mockSubscribeStore.notify.mock.calls
+        .map((call) => call[0])
+        .filter((event) => event === PassflowEvent.Register || event === PassflowEvent.SignIn);
+      expect(emitted).toEqual([PassflowEvent.Register, PassflowEvent.SignIn]);
     });
 
     test('should handle passkeyRegister API error', async () => {

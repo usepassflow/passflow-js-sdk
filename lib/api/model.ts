@@ -276,7 +276,6 @@ export type PassflowAuthorizationResponse = Tokens & {
   code?: string;
   /** Where the server sends the user next; a password reset answers with its link's redirect. */
   redirect_url?: string;
-  requires_2fa?: boolean;
   challenge_id?: string;
   tfa_token?: string;
   token_delivery?: 'json_body' | 'cookie' | 'mobile';
@@ -318,7 +317,6 @@ export const isEmailVerificationStep = (response: unknown): response is Passflow
 
 export type PassflowValidationResponse = Tokens & {
   redirect_url: string;
-  requires_2fa?: boolean;
   challenge_id?: string;
   tfa_token?: string;
   /** PKCE app: the code to redeem with the verifier, in place of tokens. */
@@ -371,12 +369,24 @@ export class PassflowError extends Error {
 
   constructor(error: PassflowResponseError['error'], options?: { cause?: unknown }) {
     super();
+    this.name = 'PassflowError';
     this.id = error?.id ?? 'unknown';
     this.message = error?.message ?? error ?? 'Something went wrong';
     this.status = error?.status ?? 500;
     this.location = error?.location ?? 'unknown';
     this.time = error?.time ?? new Date().toISOString();
     if (options?.cause !== undefined) this.cause = options.cause;
+  }
+}
+
+/** Id of the 403 a password sign-in answers with when the user must change the password first. */
+export const PASSWORD_CHANGE_REQUIRED_ERROR_ID = 'error.api.password.change.required';
+
+/** The sign-in was refused until the user changes the password; no token comes with it. */
+export class PassflowPasswordChangeRequiredError extends PassflowError {
+  constructor(error: PassflowResponseError['error'], options?: { cause?: unknown }) {
+    super(error, options);
+    this.name = 'PassflowPasswordChangeRequiredError';
   }
 }
 
@@ -475,7 +485,7 @@ export type PassflowPasswordlessStatusResponse =
    * A sign-in under an OIDC parent ends where every parent sign-in ends: with the relying party's
    * `redirect_url`, or with a `tfa_token` when a second factor is owed.
    */
-  | { status?: undefined; redirect_url?: string; tfa_token?: string; requires_2fa?: boolean; challenge_id?: string };
+  | { status?: undefined; redirect_url?: string; tfa_token?: string; challenge_id?: string };
 
 export type PassflowPasswordlessApprovalInfoPayload = {
   challenge_id: string;
@@ -548,16 +558,22 @@ export type AppType = 'web' | 'spa' | 'bff' | 'android' | 'ios' | 'desktop' | 'm
 
 export type TokenDeliveryMethod = 'json_body' | 'cookie' | '';
 
+/**
+ * The public app-settings read (`GET /app/settings`) sends only `id`, `name`, `description`,
+ * `offline`, `type`, `custom_email_templates`, `auth_strategies`, the four registration and
+ * merge flags, `force_passwordless_login`, `login_app_theme`, `pkce_enabled`, `public_client`,
+ * and `defaults` when the server has them; the rest come with admin reads.
+ */
 export type AppSettings = {
   id: string;
-  secret: string;
-  active: boolean;
+  secret?: string;
+  active?: boolean;
   name: string;
   description: string;
   offline: boolean;
   type: AppType;
-  redirect_urls: string[] | null;
-  origins: string[] | null;
+  redirect_urls?: string[] | null;
+  origins?: string[] | null;
   custom_email_templates: boolean;
   auth_strategies: AuthStrategies[];
   force_passwordless_login: boolean;
@@ -571,14 +587,14 @@ export type AppSettings = {
    * on servers that do not report it.
    */
   public_client?: boolean;
-  custom_sms_messages: boolean;
+  custom_sms_messages?: boolean;
   registration_allowed: boolean;
-  invite_only_registration: boolean;
+  invite_only_registration?: boolean;
   passwordless_registration_allowed: boolean;
   anonymous_registration_allowed: boolean;
-  create_tenant_on_registration: 'never' | 'always' | 'optional';
+  create_tenant_on_registration?: 'never' | 'always' | 'optional';
   fim_merge_by_email_allowed: boolean;
-  debug_otp_code_allowed: boolean;
+  debug_otp_code_allowed?: boolean;
   /**
    * WRITE-ONLY. Every read and write answer returns it as an empty string; the stored code is
    * never echoed. On write, a blank or absent value keeps the stored code and a non-blank value
@@ -589,7 +605,7 @@ export type AppSettings = {
   debug_otp_code_for_registration?: string;
   /** READ-ONLY. `true` when a `debug_otp_code_for_registration` is stored. Ignored on write. */
   debug_otp_code_set?: boolean;
-  defaults: DefaultAppSettings;
+  defaults?: DefaultAppSettings;
   login_app_theme: LoginWebAppTheme;
   login_app_settings?: unknown;
   token_delivery_method?: TokenDeliveryMethod;
@@ -681,6 +697,11 @@ export type PassflowPasskeyRegisterStartPayload = {
   create_tenant?: boolean;
 
   relying_party_id: string;
+  /**
+   * Must exactly match one of the app's registered redirect URLs: scheme and host are compared
+   * case-insensitively, path and query exactly. Empty is allowed. Otherwise the server refuses
+   * with 400 `error.app.redirect.url.not.registered`.
+   */
   redirect_url: string;
   code_challenge?: string;
 };
@@ -1003,9 +1024,12 @@ export type TwoFactorRegenerateRequest = {
 // Response Types
 export type TwoFactorStatusResponse = {
   enabled: boolean;
-  policy: TwoFactorPolicy;
+  enabled_at?: string;
   recovery_codes_remaining: number;
-  totp_digits?: 6 | 8; // Optional for backward compatibility, defaults to 6 if not provided
+  /** Digits in the TOTP code. Present only when the user holds a TOTP enrolment. */
+  totp_digits?: 6 | 8;
+  /** Seconds per TOTP step. Present only when the user holds a TOTP enrolment. */
+  totp_period?: number;
 };
 
 export type TwoFactorSetupResponse = {
@@ -1014,13 +1038,19 @@ export type TwoFactorSetupResponse = {
   qr_code: string;
   /** The `otpauth://` URL the QR code holds. */
   qr_code_url?: string;
-  totp_digits?: 6 | 8; // Optional for backward compatibility, defaults to 6 if not provided
+  /** Digits in the TOTP code. The setup answer always sends it. */
+  totp_digits?: 6 | 8;
+  /** Seconds per TOTP step. The setup answer always sends it. */
+  totp_period?: number;
 };
 
 export type TwoFactorConfirmResponse = {
-  success: true;
-  enabled?: boolean;
-  recovery_codes: string[];
+  enabled: boolean;
+  /**
+   * The server issues recovery codes on every enrolment; the field is optional only so an older or
+   * different server that omits it doesn't break the type.
+   */
+  recovery_codes?: string[];
 };
 
 /**
@@ -1035,6 +1065,15 @@ export type TwoFactorEnrollment = 'verify' | 'email_link' | 'direct' | 'unavaila
 /** GET /auth/2fa/enrollment */
 export type TwoFactorEnrollmentResponse = {
   enrollment: TwoFactorEnrollment;
+  /** Digits in the user's TOTP code. Present only when the user holds a TOTP enrolment. */
+  totp_digits?: 6 | 8;
+  /** Seconds per TOTP step. Present only when the user holds a TOTP enrolment. */
+  totp_period?: number;
+  /**
+   * Whether this sign-in may ask to trust the device (`trust_device`), as the app allows.
+   * Absent from servers older than the flag; treat absent as unknown.
+   */
+  device_trust_available?: boolean;
 };
 
 /** POST /auth/2fa/enrollment/email-link */
@@ -1042,11 +1081,22 @@ export type TwoFactorSetupLinkResponse = {
   email_sent: boolean;
 };
 
-export type TwoFactorVerifyResponse = Tokens & {
-  success: true;
-  /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
-  code?: string;
+/**
+ * How a sign-in under an OIDC parent (hosted login, `/oidc/authorize`) continues once its second
+ * factor is done: no tokens, the browser goes to `redirect_url` (the relying party's callback with
+ * its code), or posts `form_post` for `response_mode=form_post`.
+ */
+export type TwoFactorParentAnswer = {
+  redirect_url?: string;
+  form_post?: { action: string; fields: Record<string, string> };
 };
+
+export type TwoFactorVerifyResponse = Tokens &
+  TwoFactorParentAnswer & {
+    success?: true;
+    /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
+    code?: string;
+  };
 
 /**
  * Options for the call that completes a sign-in with its second factor.
@@ -1079,18 +1129,18 @@ export type TwoFactorTrustedDevicesResponse = {
 };
 
 export type TwoFactorRecoveryResponse = Tokens & {
-  success: true;
-  remaining_recovery_codes: number;
+  success?: true;
+  /** Codes left after this one. The server may leave it out. */
+  remaining_recovery_codes?: number;
   /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
   code?: string;
 };
 
 export type TwoFactorDisableResponse = {
-  success: true;
+  disabled: true;
 };
 
 export type TwoFactorRegenerateResponse = {
-  success: true;
   recovery_codes: string[];
 };
 
@@ -1167,10 +1217,20 @@ export interface TwoFactorChallengeRequest {
 export interface TwoFactorChallengeResponse {
   challenge_id: string;
   method: TwoFactorMethod;
-  alternative_methods: TwoFactorMethod[];
+  /** Other methods the user can switch to. Absent from the answer to a switch. */
+  alternative_methods?: TwoFactorMethod[];
   expires_at: string;
   code_sent_to?: string; // Masked email/phone for OTP
   webauthn_options?: unknown; // For passkey
+  /** Digits in the TOTP code. TOTP challenges only. */
+  totp_digits?: 6 | 8;
+  /** Seconds per TOTP step. TOTP challenges only. */
+  totp_period?: number;
+  /**
+   * Whether this sign-in may ask to trust the device (`trust_device`), as the app allows.
+   * Absent from servers older than the flag; treat absent as unknown.
+   */
+  device_trust_available?: boolean;
 }
 
 /**
@@ -1186,23 +1246,27 @@ export interface TwoFactorVerifyRequestV2 {
 /**
  * Verify Response from v2 2FA flow
  */
-export interface TwoFactorVerifyResponseV2 {
-  success: boolean;
+export interface TwoFactorVerifyResponseV2 extends TwoFactorParentAnswer {
   access_token?: string;
   refresh_token?: string;
+  id_token?: string;
   /** On a PKCE app; `TwoFactorService` redeems it, so its callers never see one. */
   code?: string;
-  device_trusted?: boolean;
 }
 
 /**
  * Registered Two-Factor Method
  */
 export interface RegisteredTwoFactorMethod {
-  id: string;
+  id?: string;
   method: TwoFactorMethod;
-  name: string;
-  created_at: string;
+  name?: string;
+  user_id?: string;
+  app_id?: string;
+  /** `true` when this passkey also signs the user in as the first factor. */
+  is_passkey_for_1fa?: boolean;
+  created_at?: string;
+  updated_at?: string;
   last_used_at?: string;
 }
 

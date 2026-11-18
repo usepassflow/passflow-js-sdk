@@ -9,6 +9,7 @@
  */
 
 import { TokenType } from '../token';
+import { parseToken } from '../token/service';
 import { TokenDeliveryMode, Tokens } from '../types';
 
 export type Storage = {
@@ -20,6 +21,8 @@ export type Storage = {
 export interface StorageManagerParams {
   storage?: Storage;
   prefix?: string;
+  /** The app the stored tokens must be issued for; see `setAppId()`. */
+  appId?: string;
 }
 
 export class StorageManager {
@@ -36,10 +39,75 @@ export class StorageManager {
   private readonly DELIVERY_MODE_KEY = `${this.STORAGE_PREFIX}delivery_mode`;
 
   private storage: Storage;
+  private appId: string | undefined;
 
-  constructor({ storage, prefix }: StorageManagerParams = {}) {
+  constructor({ storage, prefix, appId }: StorageManagerParams = {}) {
     this.storage = storage ?? localStorage;
     this.keyStoragePrefix = prefix ? `${prefix}_` : '';
+    this.appId = appId || undefined;
+  }
+
+  /**
+   * Sets the app the stored tokens must be issued for. A stored token whose `aud` does not name
+   * this app reads as absent, so another app's session on the same origin never counts as this
+   * app's. With no app id, every stored token counts.
+   */
+  setAppId(appId: string | undefined): void {
+    this.appId = appId || undefined;
+  }
+
+  /** The stored value, or undefined when it is a JWT issued for another app than this one. */
+  private ownToken(value: string | null): string | undefined {
+    if (!value) return undefined;
+    if (!this.appId) return value;
+    let aud: unknown;
+    try {
+      aud = parseToken(value).aud;
+    } catch {
+      // Not a JWT: no audience to check.
+      return value;
+    }
+    // A token with no audience names no other app.
+    if (aud === undefined) return value;
+    const audience = Array.isArray(aud) ? aud : [aud];
+    return audience.includes(this.appId) ? value : undefined;
+  }
+
+  private readToken(key: string): string | undefined {
+    return this.ownToken(this.storage.getItem(key));
+  }
+
+  /** The keys a stored token lives in: the JSON tokens and the cookie-mode ID token. */
+  private tokenValueKeys(): string[] {
+    return [
+      this.getKeyForTokenType(TokenType.access_token),
+      this.getKeyForTokenType(TokenType.refresh_token),
+      this.getKeyForTokenType(TokenType.id_token),
+      this.ID_TOKEN_KEY,
+    ];
+  }
+
+  /** Whether `key` holds a token issued for another app: this instance leaves it in place. */
+  private holdsOtherAppToken(key: string): boolean {
+    if (!this.appId) return false;
+    const value = this.storage.getItem(key);
+    return !!value && this.ownToken(value) === undefined;
+  }
+
+  /**
+   * Whether the stored session is only another app's: some key holds another app's token and none
+   * holds this app's. The keys every session shares (scopes, delivery mode, CSRF token) are then
+   * that app's, and this instance's clearing leaves them in place.
+   */
+  holdsOnlyOtherAppSession(): boolean {
+    if (!this.appId) return false;
+    const keys = this.tokenValueKeys();
+    return keys.some((key) => this.holdsOtherAppToken(key)) && !keys.some((key) => !!this.readToken(key));
+  }
+
+  /** Removes the token in `key` unless it is another app's. */
+  private removeOwnToken(key: string): void {
+    if (!this.holdsOtherAppToken(key)) this.storage.removeItem(key);
   }
 
   /**
@@ -66,8 +134,7 @@ export class StorageManager {
   }
 
   getToken(tokenType: TokenType): string | undefined {
-    const key = this.getKeyForTokenType(tokenType);
-    return this.storage.getItem(key) ?? undefined;
+    return this.readToken(this.getKeyForTokenType(tokenType));
   }
 
   /**
@@ -80,7 +147,7 @@ export class StorageManager {
 
     if (mode === TokenDeliveryMode.Cookie || mode === TokenDeliveryMode.BFF) {
       // Cookie/BFF mode: return ID token only (access/refresh in HttpOnly cookies)
-      const idToken = this.storage.getItem(this.ID_TOKEN_KEY);
+      const idToken = this.readToken(this.ID_TOKEN_KEY);
       if (!idToken) return undefined;
       return {
         id_token: idToken,
@@ -89,12 +156,12 @@ export class StorageManager {
     }
 
     // JSON mode: return all stored tokens (existing behavior)
-    const access = this.storage.getItem(this.getKeyForTokenType(TokenType.access_token));
+    const access = this.readToken(this.getKeyForTokenType(TokenType.access_token));
     if (!access) return undefined;
     return {
       access_token: access,
-      id_token: this.storage.getItem(this.getKeyForTokenType(TokenType.id_token)) ?? undefined,
-      refresh_token: this.storage.getItem(this.getKeyForTokenType(TokenType.refresh_token)) ?? undefined,
+      id_token: this.readToken(this.getKeyForTokenType(TokenType.id_token)),
+      refresh_token: this.readToken(this.getKeyForTokenType(TokenType.refresh_token)),
       scopes: this.storage.getItem(this.scopes)?.split(',') ?? undefined,
     };
   }
@@ -108,8 +175,7 @@ export class StorageManager {
    * Used to detect stale state where delivery_mode is set but JSON tokens exist
    */
   hasJsonModeTokens(): boolean {
-    const accessToken = this.storage.getItem(this.getKeyForTokenType(TokenType.access_token));
-    return !!accessToken;
+    return !!this.readToken(this.getKeyForTokenType(TokenType.access_token));
   }
 
   /**
@@ -117,8 +183,7 @@ export class StorageManager {
    * Used to detect legitimate cookie/BFF mode sessions
    */
   hasCookieModeIdToken(): boolean {
-    const idToken = this.storage.getItem(this.ID_TOKEN_KEY);
-    return !!idToken;
+    return !!this.readToken(this.ID_TOKEN_KEY);
   }
 
   deleteToken(tokenType: TokenType): void {
@@ -126,19 +191,53 @@ export class StorageManager {
     this.storage.removeItem(key);
   }
 
+  /**
+   * Clears this app's stored session, key by key: a key holding another app's token stays. The
+   * keys every session shares (scopes, delivery mode, CSRF token) stay only when the stored session
+   * is another app's alone, and the hosted sign-in record only when another app wrote it.
+   */
   deleteTokens(): void {
-    // Clear JSON mode tokens
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.id_token));
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.access_token));
-    this.storage.removeItem(this.getKeyForTokenType(TokenType.refresh_token));
-    this.storage.removeItem(this.scopes);
+    // Decided before anything is removed: afterwards none of this app's tokens is left to tell.
+    const keepShared = this.holdsOnlyOtherAppSession();
 
-    // Clear cookie mode ID token
-    this.clearIdToken();
+    // Clear JSON mode tokens and the cookie mode ID token
+    for (const key of this.tokenValueKeys()) this.removeOwnToken(key);
 
-    // Clear delivery mode and CSRF token to ensure clean state for next session
-    this.clearDeliveryMode();
-    this.clearCsrfToken();
+    if (!keepShared) {
+      // Clear scopes, delivery mode and CSRF token to ensure clean state for next session
+      this.storage.removeItem(this.scopes);
+      this.clearDeliveryMode();
+      this.removeCsrfToken();
+    }
+    if (!this.appId || this.getHostedSignIn() !== undefined || !this.storage.getItem(this.hostedSignInKey())) {
+      this.storage.removeItem(this.hostedSignInKey());
+    }
+  }
+
+  /**
+   * Records that the stored session came from the hosted login, with the address it landed on.
+   * The hosted login keeps a session of its own, which a sign-out then ends too.
+   */
+  setHostedSignIn(returnUrl: string): void {
+    this.storage.setItem(this.hostedSignInKey(), JSON.stringify({ appId: this.appId ?? '', returnUrl }));
+  }
+
+  /**
+   * The address the hosted sign-in of the stored session landed on, or undefined. A record another
+   * app wrote on the same origin does not count.
+   */
+  getHostedSignIn(): string | undefined {
+    try {
+      const record = JSON.parse(this.storage.getItem(this.hostedSignInKey()) ?? '') as { appId?: unknown; returnUrl?: unknown };
+      if (record.appId !== (this.appId ?? '') || typeof record.returnUrl !== 'string') return undefined;
+      return record.returnUrl || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private hostedSignInKey(): string {
+    return `${this.keyStoragePrefix}${this.STORAGE_PREFIX}hosted_sign_in`;
   }
 
   getDeviceId(): string | undefined {
@@ -223,7 +322,7 @@ export class StorageManager {
    */
   getIdToken(): string | undefined {
     try {
-      return this.storage.getItem(this.ID_TOKEN_KEY) ?? undefined;
+      return this.readToken(this.ID_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors
       return undefined;
@@ -246,7 +345,7 @@ export class StorageManager {
    */
   clearIdToken(): void {
     try {
-      this.storage.removeItem(this.ID_TOKEN_KEY);
+      this.removeOwnToken(this.ID_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -281,6 +380,12 @@ export class StorageManager {
    * Clear the CSRF token from storage
    */
   clearCsrfToken(): void {
+    // Another app's session alone in storage: the CSRF token is that app's.
+    if (this.holdsOnlyOtherAppSession()) return;
+    this.removeCsrfToken();
+  }
+
+  private removeCsrfToken(): void {
     try {
       this.storage.removeItem(this.CSRF_TOKEN_KEY);
     } catch (_error) {

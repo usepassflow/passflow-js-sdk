@@ -91,11 +91,11 @@ describe('enrolment on a pending sign-in', () => {
     expect(requests).toHaveLength(0);
   });
 
-  test('the state comes back as the bare value', async () => {
+  test('the state comes back as the whole answer', async () => {
     const { service } = setup(answers);
     service.setPartialAuthState('', '', TFA_TOKEN);
 
-    await expect(service.getEnrollment()).resolves.toBe('direct');
+    await expect(service.getEnrollment()).resolves.toEqual({ enrollment: 'direct' });
   });
 
   test('begin and confirm send no stale body and the code, respectively', async () => {
@@ -321,5 +321,124 @@ describe('the setup answer', () => {
     const { api } = setup(() => ({ status: 200, data: { secret: 'S3CRET', qr_code_url: 'otpauth://totp/x' } }));
 
     await expect(api.beginSetup()).resolves.toEqual({ secret: 'S3CRET', qr_code: '', qr_code_url: 'otpauth://totp/x' });
+  });
+});
+
+// REGRESSION: the enrolment read returns the whole answer and adopts its TOTP digit count
+describe('the enrolment answer carries the TOTP digit count', () => {
+  const EIGHT_DIGITS = { enrollment: 'verify', totp_digits: 8, totp_period: 30 };
+  const answers =
+    (enrollment: unknown) =>
+    (config: Captured): Answer =>
+      config.url === '/auth/2fa/enrollment' ? { status: 200, data: enrollment } : { status: 200, data: { ...VALID_TOKENS } };
+
+  test('the API client returns the whole answer, not just the state', async () => {
+    const { api } = setup(answers(EIGHT_DIGITS));
+
+    await expect(api.getEnrollment(TFA_TOKEN)).resolves.toEqual(EIGHT_DIGITS);
+  });
+
+  test('the service returns the whole answer, and an 8-digit code then reaches the server', async () => {
+    const { service, requests } = setup(answers(EIGHT_DIGITS));
+    service.setPartialAuthState('', '', TFA_TOKEN);
+
+    await expect(service.getEnrollment()).resolves.toEqual(EIGHT_DIGITS);
+    expect(service.getTotpDigits()).toBe(8);
+
+    await service.verify('12345678');
+
+    const verify = lastRequest(requests);
+    expect(verify.url).toBe('/auth/2fa/verify');
+    expect(JSON.parse(verify.data as string)).toEqual({ code: '12345678' });
+    expect(service.isVerificationRequired()).toBe(false);
+  });
+
+  test('an answer with no digit count keeps the current one', async () => {
+    const { service, requests } = setup(answers({ enrollment: 'verify' }));
+    service.setPartialAuthState('', '', TFA_TOKEN);
+
+    await service.getEnrollment();
+    expect(service.getTotpDigits()).toBe(6);
+
+    await service.verify('123456');
+    expect(lastRequest(requests).url).toBe('/auth/2fa/verify');
+  });
+});
+
+// REGRESSION: a v2 challenge answer sets the TOTP digit count
+describe('the challenge answer carries the TOTP digit count', () => {
+  const CHALLENGE = {
+    challenge_id: 'c-1',
+    method: 'totp',
+    expires_at: '2026-11-18T00:05:00Z',
+    totp_digits: 8,
+    totp_period: 30,
+  };
+  const answering =
+    (url: string) =>
+    (config: Captured): Answer =>
+      config.url === url ? { status: 200, data: CHALLENGE } : { status: 200, data: {} };
+
+  test('requestChallenge', async () => {
+    const { service } = setup(answering('/v2/auth/2fa/challenge'));
+    service.setPartialAuthState('', '', TFA_TOKEN);
+
+    await service.requestChallenge({});
+
+    expect(service.getTotpDigits()).toBe(8);
+  });
+
+  test('switchToAlternative', async () => {
+    const { service } = setup(answering('/v2/auth/2fa/alternative'));
+    service.setPartialAuthState('', '', TFA_TOKEN);
+
+    await service.switchToAlternative({ challenge_id: 'c-0', method: 'totp' as never });
+
+    expect(service.getTotpDigits()).toBe(8);
+  });
+});
+
+// REGRESSION: method lists are read out of the server's envelope
+describe('2FA method lists', () => {
+  test('available methods resolve to the bare list', async () => {
+    const { service, storage } = setup((config) =>
+      config.url === '/v2/user/2fa/methods/available'
+        ? { status: 200, data: { available_methods: ['totp'] } }
+        : { status: 200, data: {} },
+    );
+    storage.saveTokens(VALID_TOKENS);
+
+    await expect(service.getAvailableMethods()).resolves.toEqual(['totp']);
+  });
+
+  test('registered methods resolve to the bare list', async () => {
+    const { service, storage } = setup((config) =>
+      config.url === '/v2/user/2fa/methods'
+        ? { status: 200, data: { registered_methods: [{ id: 'm1', method: 'totp' }], total_count: 1 } }
+        : { status: 200, data: {} },
+    );
+    storage.saveTokens(VALID_TOKENS);
+
+    await expect(service.getRegisteredMethods()).resolves.toEqual([{ id: 'm1', method: 'totp' }]);
+  });
+});
+
+// REGRESSION: a v2 verify answered with tokens alone completes the sign-in
+describe('v2 verify on the wire', () => {
+  test('tokens with no success field end the pending sign-in', async () => {
+    const { service, store } = setup((config) =>
+      config.url === '/v2/auth/2fa/verify'
+        ? { status: 200, data: { access_token: VALID_TOKENS.access_token, refresh_token: VALID_TOKENS.refresh_token } }
+        : { status: 200, data: {} },
+    );
+    const onVerified = vi.fn();
+    store.subscribe({ onAuthChange: onVerified }, [PassflowEvent.TwoFactorVerified]);
+    service.setPartialAuthState('', '', TFA_TOKEN);
+
+    const result = await service.verifyV2({ challenge_id: 'c-1', method: 'totp' as never, response: '123456' });
+
+    expect(result.access_token).toBe(VALID_TOKENS.access_token);
+    expect(onVerified).toHaveBeenCalledTimes(1);
+    expect(service.isVerificationRequired()).toBe(false);
   });
 });

@@ -28,7 +28,7 @@ const NOW_IAT = Math.floor(Date.now() / 1000);
  */
 export const VALID_ACCESS_TOKEN = `${JWT_HEADER}.${createJwtPayload({
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',
@@ -38,7 +38,7 @@ export const VALID_ACCESS_TOKEN = `${JWT_HEADER}.${createJwtPayload({
 
 export const VALID_REFRESH_TOKEN = `${JWT_HEADER}.${createJwtPayload({
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',
@@ -48,7 +48,7 @@ export const VALID_REFRESH_TOKEN = `${JWT_HEADER}.${createJwtPayload({
 
 export const VALID_ID_TOKEN = `${JWT_HEADER}.${createJwtPayload({
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',
@@ -63,7 +63,7 @@ export const VALID_ID_TOKEN = `${JWT_HEADER}.${createJwtPayload({
  */
 export const EXPIRED_ACCESS_TOKEN = `${JWT_HEADER}.${createJwtPayload({
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: PAST_EXP,
   iat: PAST_EXP - 3600,
   iss: 'test-issuer',
@@ -73,7 +73,7 @@ export const EXPIRED_ACCESS_TOKEN = `${JWT_HEADER}.${createJwtPayload({
 
 export const EXPIRED_REFRESH_TOKEN = `${JWT_HEADER}.${createJwtPayload({
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: PAST_EXP,
   iat: PAST_EXP - 3600,
   iss: 'test-issuer',
@@ -136,7 +136,7 @@ export const COOKIE_MODE_TOKENS: Tokens = {
  */
 export const VALID_PARSED_ACCESS_TOKEN: Token = {
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',
@@ -146,7 +146,7 @@ export const VALID_PARSED_ACCESS_TOKEN: Token = {
 
 export const VALID_PARSED_REFRESH_TOKEN: Token = {
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',
@@ -156,7 +156,7 @@ export const VALID_PARSED_REFRESH_TOKEN: Token = {
 
 export const VALID_PARSED_ID_TOKEN: Token = {
   sub: 'user-123',
-  aud: ['test-app'],
+  aud: ['test-app-id'],
   exp: FUTURE_EXP,
   iat: NOW_IAT,
   iss: 'test-issuer',

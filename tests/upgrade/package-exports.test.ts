@@ -91,7 +91,7 @@ describe('package entry point exposes the upgrade module', () => {
     expect(challenge).toBeDefined();
 
     const offered = selectFactors(DEFAULT_UPGRADE_FACTORS, challenge as UpgradeChallenge);
-    expect(offered[0]!.type).toBe('passkey');
+    expect(offered[0]!.type).toBe('totp');
 
     expect(factorRegistry(offered).get('totp')).toBe(totpFactor);
   });
@@ -254,6 +254,16 @@ describe.skipIf(!distIsBuilt)('the built package serves both entry conditions', 
     for (const name of KNOWN_EXPORTS) {
       expect(namespace).toContain(name);
     }
+  });
+
+  test('both entries export the step-up outcome errors and their guards', () => {
+    const probe =
+      'const kinds = ["UpgradeUnsatisfiableError", "isUpgradeUnsatisfiable", "UpgradeInsufficientError", "isUpgradeInsufficient", "UpgradeSignInRequiredError", "isUpgradeSignInRequired"].map((n) => typeof m[n]);' +
+      ' const e = new m.UpgradeUnsatisfiableError(); console.log(JSON.stringify([kinds, e.code, m.isUpgradeUnsatisfiable({})]));';
+    const expected = [['function', 'function', 'function', 'function', 'function', 'function'], 'upgrade_unsatisfiable', false];
+
+    expect(JSON.parse(runNode(`const m = require("@passflow/core"); ${probe}`))).toEqual(expected);
+    expect(JSON.parse(runNode(`import("@passflow/core").then((m) => { ${probe} });`, true))).toEqual(expected);
   });
 
   test('`import("@passflow/core")` yields a populated namespace', () => {

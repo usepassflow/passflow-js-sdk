@@ -33,7 +33,17 @@ import {
   type UpgradeDiagnosticReason,
   type UpgradeDiagnosticSink,
 } from './challenge';
-import { barOf, UpgradeCancelledError, type UpgradeElevation, UpgradeUnsatisfiableError, type Waiter } from './controller';
+import {
+  barOf,
+  noFactorReachesLevel,
+  requiresSignIn,
+  UpgradeCancelledError,
+  type UpgradeElevation,
+  UpgradeSignInRequiredError,
+  UpgradeUnsatisfiableError,
+  unmeetableReason,
+  type Waiter,
+} from './controller';
 import { UpgradeInsufficientError, UpgradeSessionChangedError, UpgradeTransportError, UpgradeUnavailableError } from './errors';
 import type { ReplayHints, ReplayPolicy } from './replay';
 import type { RequestSnapshot } from './snapshot';
@@ -239,7 +249,9 @@ export type CoreOutcome =
   | { kind: 'insufficient'; obtained: AssuranceBar; required: AssuranceBar; response?: ChallengeContext }
   | { kind: 'cancelled' }
   | { kind: 'exhausted'; error: Error }
-  | { kind: 'unsatisfiable' }
+  | { kind: 'unsatisfiable'; error?: Error; response?: ChallengeContext }
+  /** Only a fresh sign-in can meet the challenge: the server listed no factor (`available_factors: []`). */
+  | { kind: 'sign-in-required'; response?: ChallengeContext }
   | { kind: 'unavailable' }
   | { kind: 'session-changed' }
   | { kind: 'transport-failure'; status?: number; retryable: boolean; error: Error }
@@ -466,8 +478,11 @@ const classifyFailure = (e: unknown, obtained: AssuranceBar | undefined): CoreOu
   if (e instanceof UpgradeCancelledError) {
     return { kind: 'cancelled' };
   }
+  if (e instanceof UpgradeSignInRequiredError) {
+    return { kind: 'sign-in-required' };
+  }
   if (e instanceof UpgradeUnsatisfiableError) {
-    return { kind: 'unsatisfiable' };
+    return { kind: 'unsatisfiable', error: e };
   }
   if (e instanceof UpgradeUnavailableError) {
     return { kind: 'unavailable' };
@@ -483,7 +498,8 @@ const classifyFailure = (e: unknown, obtained: AssuranceBar | undefined): CoreOu
     // server's own budget (`exhausted`) and the controller's local attempt
     // budget (`attempts_exhausted`) are the same statement to a caller — stop,
     // another answer will not help — and both are terminal.
-    if (e.kind === 'exhausted' || e.kind === 'attempts_exhausted') {
+    // A rate limit is the same statement too: stop, a retry now will not help.
+    if (e.kind === 'exhausted' || e.kind === 'attempts_exhausted' || e.kind === 'rate_limited') {
       return { kind: 'exhausted', error: e };
     }
     if (e.kind === 'unavailable') {
@@ -531,6 +547,13 @@ const classifyReplay = async (
 
   if (!challenge) {
     return { kind: 'replayed', response: replayed };
+  }
+
+  if (requiresSignIn(challenge)) {
+    return { kind: 'sign-in-required', response: replayed };
+  }
+  if (noFactorReachesLevel(challenge)) {
+    return { kind: 'unsatisfiable', error: unmeetableReason(challenge), response: replayed };
   }
 
   const required = barOf(challenge);
@@ -841,7 +864,9 @@ export const coreOutcomeToError = (outcome: CoreOutcome): Error | undefined => {
     case 'cancelled':
       return new UpgradeCancelledError();
     case 'unsatisfiable':
-      return new UpgradeUnsatisfiableError();
+      return outcome.error ?? new UpgradeUnsatisfiableError();
+    case 'sign-in-required':
+      return new UpgradeSignInRequiredError();
     case 'unavailable':
       return new UpgradeUnavailableError();
     case 'session-changed':
@@ -903,6 +928,10 @@ export const settleFetchOutcome = <T extends object>(
       return options.onCancel === 'reject'
         ? { settle: 'reject', error: new UpgradeCancelledError() }
         : { settle: 'resolve', value: tagUpgradeOutcome(original, outcome) };
+    case 'unsatisfiable':
+    case 'sign-in-required':
+      // After a replay, the second challenge is the response that refused the operation.
+      return { settle: 'resolve', value: tagUpgradeOutcome((outcome.response?.raw as T) ?? original, outcome) };
     case 'insufficient':
       // The SECOND challenge is what the caller receives: it is the response
       // that actually refused the operation, and the bars travel in the tag.
@@ -966,6 +995,7 @@ const cancelled = new WeakSet<object>();
 const exhausted = new WeakSet<object>();
 const insufficient = new WeakSet<object>();
 const unsatisfiable = new WeakSet<object>();
+const signInRequired = new WeakSet<object>();
 const unavailable = new WeakSet<object>();
 const sessionChanged = new WeakSet<object>();
 const transportFailure = new WeakSet<object>();
@@ -989,6 +1019,9 @@ export const tagUpgradeOutcome = <T extends object>(response: T, outcome: CoreOu
     case 'unsatisfiable':
       unsatisfiable.add(response);
       break;
+    case 'sign-in-required':
+      signInRequired.add(response);
+      break;
     case 'unavailable':
       unavailable.add(response);
       break;
@@ -1009,6 +1042,8 @@ export const isUpgradeCancelled = (response: object): boolean => cancelled.has(r
 export const isUpgradeExhausted = (response: object): boolean => exhausted.has(response);
 export const isUpgradeInsufficient = (response: object): boolean => insufficient.has(response);
 export const isUpgradeUnsatisfiable = (response: object): boolean => unsatisfiable.has(response);
+/** Only a fresh sign-in can meet the challenge (`available_factors: []`): sign the user in again. */
+export const isUpgradeSignInRequired = (response: object): boolean => signInRequired.has(response);
 export const isUpgradeUnavailable = (response: object): boolean => unavailable.has(response);
 export const isUpgradeSessionChanged = (response: object): boolean => sessionChanged.has(response);
 /** FR1's non-retryable 400 class. */

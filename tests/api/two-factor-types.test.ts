@@ -5,6 +5,7 @@
 import { describe, expectTypeOf, test } from 'vitest';
 import type {
   TwoFactorChallengeResponse,
+  TwoFactorConfirmResponse,
   TwoFactorDisableResponse,
   TwoFactorEnrollmentResponse,
   TwoFactorStatusResponse,
@@ -36,5 +37,14 @@ describe('2FA answer types', () => {
     expectTypeOf<TwoFactorVerifyResponse['form_post']>().toEqualTypeOf<
       { action: string; fields: Record<string, string> } | undefined
     >();
+  });
+
+  test('enrolment and challenge answers say whether this device can be trusted', () => {
+    expectTypeOf<TwoFactorEnrollmentResponse['device_trust_available']>().toEqualTypeOf<boolean>();
+    expectTypeOf<TwoFactorChallengeResponse['device_trust_available']>().toEqualTypeOf<boolean>();
+  });
+
+  test('confirm carries no recovery codes when the app does not use them', () => {
+    expectTypeOf<TwoFactorConfirmResponse['recovery_codes']>().toEqualTypeOf<string[] | undefined>();
   });
 });

@@ -1046,7 +1046,8 @@ export type TwoFactorSetupResponse = {
 
 export type TwoFactorConfirmResponse = {
   enabled: boolean;
-  recovery_codes: string[];
+  /** Absent when the app does not use recovery codes. */
+  recovery_codes?: string[];
 };
 
 /**
@@ -1065,6 +1066,8 @@ export type TwoFactorEnrollmentResponse = {
   totp_digits?: 6 | 8;
   /** Seconds per TOTP step. Present only when the user holds a TOTP enrolment. */
   totp_period?: number;
+  /** Whether this sign-in may ask to trust the device (`trust_device`), as the app allows. */
+  device_trust_available: boolean;
 };
 
 /** POST /auth/2fa/enrollment/email-link */
@@ -1217,6 +1220,8 @@ export interface TwoFactorChallengeResponse {
   totp_digits?: 6 | 8;
   /** Seconds per TOTP step. TOTP challenges only. */
   totp_period?: number;
+  /** Whether this sign-in may ask to trust the device (`trust_device`), as the app allows. */
+  device_trust_available: boolean;
 }
 
 /**

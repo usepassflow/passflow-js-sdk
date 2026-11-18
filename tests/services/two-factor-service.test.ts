@@ -440,6 +440,18 @@ describe('TwoFactorService', () => {
       );
     });
 
+    // REGRESSION: an app without recovery codes confirms with no recovery_codes at all
+    test('an answer with no recovery codes emits TwoFactorEnabled with none', async () => {
+      mockTwoFactorApi.confirmSetup.mockResolvedValue({ enabled: true });
+
+      const result = await twoFactorService.confirmSetup('123456');
+
+      expect(result).toEqual({ enabled: true });
+      const [, payload] = mockSubscribeStore.notify.mock.calls.find(([event]) => event === PassflowEvent.TwoFactorEnabled)!;
+      expect(payload.recoveryCodes).toEqual([]);
+      expect(() => payload.clearRecoveryCodes()).not.toThrow();
+    });
+
     test('TEST-7: Confirm 2FA setup with invalid code', async () => {
       // Given: User enters invalid TOTP code
       const error = new PassflowError({

@@ -704,7 +704,7 @@ switch (enrollment) {
     break;
   case "direct": { // no factor, no validated email: enrol on this sign-in
     const setup = await passflow.beginTwoFactorEnrollment(); // setup.secret, setup.qr_code (base64 PNG)
-    const { recovery_codes } = await passflow.confirmTwoFactorEnrollment(code); // show these once
+    const { recovery_codes } = await passflow.confirmTwoFactorEnrollment(code); // show these once; absent when the app uses none
     await passflow.verifyTwoFactor(code); // the same code finishes the sign-in
     break;
   }
@@ -713,6 +713,8 @@ switch (enrollment) {
 }
 ```
 
+- **Trusted devices.** `device_trust_available` on the enrolment and on a v2 challenge says whether
+  to offer "trust this device" (`trust_device`) on this sign-in.
 - **TOTP digits.** Read `getTwoFactorEnrollment()` before asking for the code. With a TOTP
   enrolment it answers `totp_digits` (6 or 8) and `totp_period`, as does `requestChallenge`: size the
   code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until

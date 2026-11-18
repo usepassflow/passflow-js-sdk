@@ -227,9 +227,14 @@ export class Passflow {
       this.scopes,
       this.createTenantForNewUser,
       this.url,
+      // Read when a check runs: session() sets the callbacks after this constructor.
       {
-        createSession: this.createSessionCallback,
-        expiredSession: this.expiredSessionCallback,
+        createSession: async (session) => {
+          await this.createSessionCallback?.(session);
+        },
+        expiredSession: async () => {
+          await this.expiredSessionCallback?.();
+        },
       },
       this.appId ?? '',
       config.tokenExchange,

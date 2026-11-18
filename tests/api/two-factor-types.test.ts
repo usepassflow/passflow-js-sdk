@@ -40,8 +40,8 @@ describe('2FA answer types', () => {
   });
 
   test('enrolment and challenge answers say whether this device can be trusted', () => {
-    expectTypeOf<TwoFactorEnrollmentResponse['device_trust_available']>().toEqualTypeOf<boolean>();
-    expectTypeOf<TwoFactorChallengeResponse['device_trust_available']>().toEqualTypeOf<boolean>();
+    expectTypeOf<TwoFactorEnrollmentResponse['device_trust_available']>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<TwoFactorChallengeResponse['device_trust_available']>().toEqualTypeOf<boolean | undefined>();
   });
 
   test('confirm carries no recovery codes when the app does not use them', () => {

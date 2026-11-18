@@ -419,6 +419,11 @@ export class Passflow {
    * Attaches step-up handling to an axios instance the caller already owns,
    * **mutating** it, and returns a `detach()` disposer.
    *
+   * It also adds a request interceptor with `withAuth`'s rule: a request for the
+   * page's own origin or one in `options.origins` (exact scheme, host and port,
+   * `baseURL` joined as axios does) that has no `Authorization` header gets
+   * `Bearer <access token>`. The disposer removes both interceptors.
+   *
    * The parameter is typed structurally — duck-typed on
    * `interceptors.response.use` — so this package's axios version is not a
    * constraint on the caller's. It returns the disposer rather than the
@@ -428,16 +433,17 @@ export class Passflow {
    * @example
    * ```typescript
    * const api = axios.create({ baseURL: 'https://api.example.com' });
-   * const detach = passflow.attachAuth(api);
+   * const detach = passflow.attachAuth(api, { origins: ['https://api.example.com'] });
    * ```
    */
-  attachAuth(instance: ResponseInterceptorHost): () => void {
-    return this.upgrade.attachAuth(instance);
+  attachAuth(instance: ResponseInterceptorHost, options?: WithAuthOptions): () => void {
+    return this.upgrade.attachAuth(instance, options);
   }
 
   /**
-   * Builds a ready axios instance with step-up handling already wired, for a
-   * caller with no HTTP client of their own.
+   * Builds a ready axios instance with step-up handling and the access token
+   * (as `attachAuth`, with `options.origins`) already wired, for a caller with no
+   * HTTP client of their own.
    *
    * Pure passthrough of axios' own create options, so `baseURL`, `headers`,
    * `timeout` and `adapter` stay the caller's. A `baseURL` is NOT read as a
@@ -446,11 +452,11 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * const api = passflow.createClient({ baseURL: 'https://api.example.com' });
+   * const api = passflow.createClient({ baseURL: 'https://api.example.com' }, { origins: ['https://api.example.com'] });
    * ```
    */
-  createClient(config?: CreateClientConfig): AxiosInstance {
-    return createUpgradeClient(config, (instance) => this.upgrade.attachAuth(instance));
+  createClient(config?: CreateClientConfig, options?: WithAuthOptions): AxiosInstance {
+    return createUpgradeClient(config, (instance) => this.upgrade.attachAuth(instance, options));
   }
 
   /**

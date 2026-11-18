@@ -43,7 +43,7 @@ import { FETCH_PRIORITY_UPGRADE, registerFetchMiddleware } from '../interceptors
 import type { PlatformAdapter } from '../platform';
 
 import { readAcrValues } from './acr';
-import { type WithAuthOptions, withAccessToken } from './attach-token';
+import { type AccessTokenReader, axiosAccessTokenInterceptor, type WithAuthOptions, withAccessToken } from './attach-token';
 import { type AxiosReissue, attachUpgradeAuth, createAxiosUpgradeHandler, type ResponseInterceptorHost } from './axios-adapter';
 import type { AssuranceBar, UpgradeChallenge, UpgradeDiagnosticSink } from './challenge';
 import {
@@ -210,7 +210,11 @@ export type UpgradeFacade = {
    */
   withAuth(next?: FetchLike, options?: WithAuthOptions): FetchLike;
   /** Attaches to an axios instance the developer owns, MUTATING it. Returns `detach()`. */
-  attachAuth(instance: ResponseInterceptorHost): () => void;
+  /**
+   * Attaches step-up handling to an axios instance and, under the same rule as `withAuth`, a
+   * request interceptor that adds the access token. Returns a disposer that removes both.
+   */
+  attachAuth(instance: ResponseInterceptorHost, options?: WithAuthOptions): () => void;
 };
 
 /** `backend` as declared → the list the scope predicate reads. */
@@ -560,7 +564,17 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
     },
     attachAuth: {
       enumerable: true,
-      value: (instance: ResponseInterceptorHost): (() => void) => attachUpgradeAuth(instance, interceptorOptions),
+      value: (instance: ResponseInterceptorHost, options?: WithAuthOptions): (() => void) => {
+        const request = deps.readAccessToken ? instance.interceptors.request : undefined;
+        const tokenId = request?.use(axiosAccessTokenInterceptor(deps.readAccessToken as AccessTokenReader, options));
+        const detachStepUp = attachUpgradeAuth(instance, interceptorOptions);
+        return () => {
+          detachStepUp();
+          if (request && tokenId !== undefined) {
+            request.eject(tokenId);
+          }
+        };
+      },
     },
   });
 };

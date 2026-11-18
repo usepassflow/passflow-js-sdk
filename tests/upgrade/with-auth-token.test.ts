@@ -1,3 +1,4 @@
+import axios, { type AxiosAdapter, AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AuthAPI } from '../../lib/api';
 import { UpgradeAPI } from '../../lib/api/upgrade';
@@ -6,7 +7,7 @@ import type { Tokens } from '../../lib/types';
 import { totpFactor } from '../../lib/upgrade/factors';
 import { TEST_CONFIG } from '../helpers/fixtures';
 import { jwt } from '../refresh/jwt';
-import { challengeResponse } from './fetch-fixtures';
+import { challengeHeader, challengeResponse } from './fetch-fixtures';
 
 const EXPIRED = 1_600_000_000;
 const FUTURE = 4_102_444_800;
@@ -176,3 +177,151 @@ describe('withAuth(fetch) attaches the access token to allowed origins only', ()
     }
   });
 });
+
+describe.each(['attachAuth', 'createClient'] as const)(
+  '%s(axios) attaches the access token to allowed origins only',
+  (surface) => {
+    let sent: Sent[];
+    let challenges: number;
+    const own = () => window.location.origin;
+
+    const adapter: AxiosAdapter = async (config: InternalAxiosRequestConfig) => {
+      sent.push({
+        url: axios.getUri(config),
+        authorization: (config.headers.get('Authorization') as string | undefined) ?? null,
+      });
+      if (challenges > 0) {
+        challenges -= 1;
+        const response = {
+          status: 403,
+          statusText: '403',
+          headers: { 'www-authenticate': challengeHeader, 'content-type': 'application/json' },
+          data: { error: 'upgrade_required', acr_values: '2' },
+          config,
+        };
+        throw new AxiosError('Request failed with status code 403', 'ERR_BAD_REQUEST', config, null, response);
+      }
+      return { status: 200, statusText: 'OK', headers: {}, data: 'ok', config };
+    };
+
+    const clientFor = (passflow: Passflow, config: { baseURL?: string } = {}, origins?: string[]): AxiosInstance => {
+      const options = origins ? { origins } : undefined;
+      if (surface === 'createClient') return passflow.createClient({ ...config, adapter }, options);
+      const client = axios.create({ ...config, adapter });
+      passflow.attachAuth(client, options);
+      return client;
+    };
+
+    const newPassflow = (tokens?: Tokens) => {
+      const passflow = new Passflow({ ...TEST_CONFIG, refreshCoordination: 'none' });
+      if (tokens) passflow.setTokens(tokens);
+      return passflow;
+    };
+
+    beforeEach(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+      sent = [];
+      challenges = 0;
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    test("the app's own origin gets the token, absolute, relative and through a baseURL", async () => {
+      const tokens = pairOf(1_700_000_000);
+      const passflow = newPassflow(tokens);
+
+      await clientFor(passflow).get(`${own()}/api/me`);
+      await clientFor(passflow).get('/api/me');
+      await clientFor(passflow, { baseURL: `${own()}/api` }).get('me');
+
+      expect(sent.map((s) => s.authorization)).toEqual(Array(3).fill(`Bearer ${tokens.access_token}`));
+    });
+
+    test('a listed origin gets the token, through a baseURL too', async () => {
+      const tokens = pairOf(1_700_000_000);
+      const passflow = newPassflow(tokens);
+
+      await clientFor(passflow, {}, ['https://api.example.com']).post('https://api.example.com/transfer');
+      await clientFor(passflow, { baseURL: 'https://api.example.com/v1' }, ['https://api.example.com']).get('/orders');
+
+      expect(sent.map((s) => s.authorization)).toEqual(Array(2).fill(`Bearer ${tokens.access_token}`));
+    });
+
+    test.each([
+      ['an unlisted origin', 'https://other.example.com/x'],
+      ['a lookalike host', 'https://api.example.com.evil.com/x'],
+      ['a lookalike with the listed host in the path', 'https://evil.com/https://api.example.com/x'],
+      ['a different port', 'https://api.example.com:8443/x'],
+      ['http instead of https', 'http://api.example.com/x'],
+      ['a third-party URL', 'https://cdn.thirdparty.net/lib.js'],
+    ])('%s gets no token', async (_name, url) => {
+      await clientFor(newPassflow(pairOf(1_700_000_000)), {}, ['https://api.example.com']).get(url);
+
+      expect(sent[0]?.authorization).toBeNull();
+    });
+
+    test('an absolute URL on a client whose baseURL is listed is judged by its own origin', async () => {
+      await clientFor(newPassflow(pairOf(1_700_000_000)), { baseURL: 'https://api.example.com' }, [
+        'https://api.example.com',
+      ]).get('https://cdn.thirdparty.net/x');
+
+      expect(sent[0]?.authorization).toBeNull();
+    });
+
+    test('an Authorization header the caller set is kept, per request and as a client default', async () => {
+      const passflow = newPassflow(pairOf(1_700_000_000));
+
+      await clientFor(passflow).get('/api/a', { headers: { Authorization: 'Basic abc' } });
+      const client = clientFor(passflow);
+      client.defaults.headers.common.Authorization = 'Bearer mine';
+      await client.get('/api/b');
+
+      expect(sent.map((s) => s.authorization)).toEqual(['Basic abc', 'Bearer mine']);
+    });
+
+    test('an expired access token is refreshed once, then the new one is attached', async () => {
+      const fresh = pairOf(1_700_000_060);
+      const refresh = vi.spyOn(AuthAPI.prototype, 'refreshToken').mockResolvedValue({ ...fresh } as never);
+      const client = clientFor(newPassflow(pairOf(1_700_000_000, false)));
+
+      await client.get('/api/me');
+      await client.get('/api/me');
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(sent.map((s) => s.authorization)).toEqual(Array(2).fill(`Bearer ${fresh.access_token}`));
+    });
+
+    test('signed out: no header is added', async () => {
+      await clientFor(newPassflow()).get('/api/me');
+
+      expect(sent[0]?.authorization).toBeNull();
+    });
+
+    test('a step-up on a request whose token it attached replays with the new token', async () => {
+      const before = pairOf(1_700_000_000);
+      const after = pairOf(1_700_000_060);
+      vi.spyOn(AuthAPI.prototype, 'refreshToken').mockResolvedValue({ ...after } as never);
+      const passflow = newPassflow(before);
+      const disable = passflow.upgrade.enable({
+        factors: [totpFactor],
+        backend: '/api',
+        prompt: async (request) => {
+          request.onFactorSelected('totp');
+          return { type: 'submit', factor: 'totp', code: '123456' };
+        },
+      });
+      challenges = 1;
+      try {
+        const res = await clientFor(passflow).post('/api/transfer', { amount: 1 });
+
+        expect(res.status).toBe(200);
+        expect(sent.map((s) => s.authorization)).toEqual([`Bearer ${before.access_token}`, `Bearer ${after.access_token}`]);
+      } finally {
+        disable();
+      }
+    });
+  },
+);

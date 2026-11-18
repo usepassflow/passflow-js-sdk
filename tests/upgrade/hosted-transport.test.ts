@@ -317,17 +317,17 @@ describe('hosted upgrade cookie-only transport', () => {
         return { type: 'submit', factor: 'totp', code: '123456' };
       },
     });
-    const fresh = { status: 403, acrValues: '2', requiredLevel: 2, maxAge: 60 };
+    const fresh = { status: 403, acrValues: '2', requiredLevel: 2, maxAge: 5 };
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     try {
       await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
-      now.mockReturnValue(1_000_000 + 59_000);
+      now.mockReturnValue(1_000_000 + 4_000);
       await expect(f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' })).rejects.toBeInstanceOf(
         UpgradeInsufficientError,
       );
       expect(prompts).toBe(1);
 
-      now.mockReturnValue(1_000_000 + 61_000);
+      now.mockReturnValue(1_000_000 + 6_000);
       await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
       expect(prompts).toBe(2);
     } finally {
@@ -335,7 +335,7 @@ describe('hosted upgrade cookie-only transport', () => {
     }
   });
 
-  test('a level-only proof counts for 60 seconds: refused at 59 s, prompts again at 61 s', async () => {
+  test('a level-only proof counts for 10 seconds: refused at 9 s, prompts again at 11 s', async () => {
     const f = start();
     let prompts = 0;
     const disable = f.passflow.hostedUpgrade.enable({
@@ -350,13 +350,13 @@ describe('hosted upgrade cookie-only transport', () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     try {
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
-      now.mockReturnValue(1_000_000 + 59_000);
+      now.mockReturnValue(1_000_000 + 9_000);
       await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
         UpgradeInsufficientError,
       );
       expect(prompts).toBe(1);
 
-      now.mockReturnValue(1_000_000 + 61_000);
+      now.mockReturnValue(1_000_000 + 11_000);
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
       expect(prompts).toBe(2);
     } finally {
@@ -385,7 +385,7 @@ describe('hosted upgrade cookie-only transport', () => {
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
       expect(prompts).toBe(1);
 
-      now.mockReturnValue(1_000_000 + 61_000);
+      now.mockReturnValue(1_000_000 + 11_000);
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
       expect(prompts).toBe(2);
     } finally {

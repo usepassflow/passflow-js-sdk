@@ -750,9 +750,10 @@ switch (enrollment) {
   challenge it last proved on this page. An `elevate()` with a challenge that is not strictly
   stronger (a higher level or a shorter `max_age`) rejects with `UpgradeInsufficientError`, with no
   prompt and no request: the server refused a proof that met it, so prompting again would loop. Sign
-  the user in again instead. The proof counts for one minute (or the requirement's `max_age`, if
-  shorter): after that the server's elevation may have lapsed, and the same requirement prompts
-  again. A sign-in or sign-out clears it.
+  the user in again instead. The proof counts for 10 seconds from its commit request (or the
+  requirement's `max_age`, if shorter): after that the same requirement prompts again. This relies on
+  the server rejecting an elevation window under 10 seconds, so a lapsed elevation is never
+  refused. A sign-in or sign-out clears it.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,

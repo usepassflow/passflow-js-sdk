@@ -331,8 +331,12 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
    */
   /** When the latest commit request went out: the time a proof is remembered from. */
   let commitSentAt: number | undefined;
-  /** How long a proof counts against the same requirement coming back. */
-  const PROOF_MEMORY_MS = 60_000;
+  /**
+   * How long a proof counts against the same requirement coming back. The server
+   * rejects an elevation window under 10 seconds, so no valid re-challenge falls
+   * inside it.
+   */
+  const PROOF_MEMORY_MS = 10_000;
   /** The challenge this page last proved and when, under `stopRepeatedElevation`. */
   let lastProven: { challenge: UpgradeChallenge; at: number } | undefined;
   deps.stopRepeatedElevation?.subscribe(() => {
@@ -341,7 +345,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
 
   /**
    * Whether `challenge` is met by the last proof: not stronger, and proved within the
-   * last minute (or within its `max_age`, if shorter). A refused proof loops straight
+   * last 10 seconds (or within its `max_age`, if shorter). A refused proof loops straight
    * away; later, the server's elevation may simply have lapsed, and a new step-up is due.
    */
   const alreadyProven = (challenge: UpgradeChallenge): UpgradeChallenge | undefined => {

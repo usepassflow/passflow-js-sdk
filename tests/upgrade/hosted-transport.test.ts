@@ -293,6 +293,14 @@ describe('hosted upgrade cookie-only transport', () => {
       await f.passflow.logOut();
       await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
       expect(prompts).toBe(3);
+
+      // So does a sign-in.
+      await expect(f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      f.passflow.setTokens(copyTokens(VALID_TOKENS));
+      await f.passflow.hostedUpgrade.elevate(aal2, { kind: 'imperative' });
+      expect(prompts).toBe(4);
     } finally {
       disable();
     }

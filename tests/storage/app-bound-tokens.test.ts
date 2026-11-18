@@ -88,6 +88,50 @@ describe('stored tokens are bound to the app', () => {
   });
 });
 
+describe("clearing never removes another app's session", () => {
+  test("deleteTokens on app B leaves app A's JSON session in place", () => {
+    const storage = new FakeStorage();
+    const a = new StorageManager({ storage, appId: 'app-a' });
+    const tokens = tokensFor(['app-a']);
+    a.saveTokens(tokens);
+    a.setHostedSignIn('https://a.example/cb');
+
+    const b = new StorageManager({ storage, appId: 'app-b' });
+    b.deleteTokens();
+    b.clearIdToken();
+    b.clearCsrfToken();
+
+    expect(a.getTokens()).toEqual(tokens);
+    expect(a.getHostedSignIn()).toBe('https://a.example/cb');
+  });
+
+  test("app B's clearing leaves app A's cookie-mode session in place", () => {
+    const storage = new FakeStorage();
+    const a = new StorageManager({ storage, appId: 'app-a' });
+    a.setDeliveryMode(TokenDeliveryMode.Cookie);
+    a.saveTokens(tokensFor(['app-a']), TokenDeliveryMode.Cookie);
+    a.setCsrfToken('csrf-a');
+
+    const b = new StorageManager({ storage, appId: 'app-b' });
+    b.deleteTokens();
+    b.clearIdToken();
+    b.clearCsrfToken();
+
+    expect(a.getIdToken()).toBeDefined();
+    expect(a.getCsrfToken()).toBe('csrf-a');
+    expect(a.getDeliveryMode()).toBe(TokenDeliveryMode.Cookie);
+  });
+
+  test("this app's session is cleared as before", () => {
+    const storage = new FakeStorage();
+    const a = new StorageManager({ storage, appId: 'app-a' });
+    a.saveTokens(tokensFor(['app-a']));
+    a.deleteTokens();
+    expect(a.getTokens()).toBeUndefined();
+    expect(new StorageManager({ storage }).getTokens()).toBeUndefined();
+  });
+});
+
 describe('the hosted sign-in record is bound to the app', () => {
   test('another app on the same storage does not see it', () => {
     const storage = new FakeStorage();

@@ -15,6 +15,18 @@ describe("another app's session on the same origin", () => {
     expect(other.getParsedTokens()).toBeUndefined();
   });
 
+  test("logOut on another app's instance leaves the first app signed in", async () => {
+    const first = new Passflow(TEST_CONFIG);
+    first.setTokens(VALID_TOKENS);
+
+    const other = new Passflow({ ...TEST_CONFIG, appId: 'another-app' });
+    await other.logOut();
+
+    const again = new Passflow(TEST_CONFIG);
+    expect(again.isAuthenticated()).toBe(true);
+    expect((await again.getTokens())?.access_token).toBe(VALID_TOKENS.access_token);
+  });
+
   test('setAppId to another app drops the session the instance holds', async () => {
     const sdk = new Passflow(TEST_CONFIG);
     sdk.setTokens(VALID_TOKENS);

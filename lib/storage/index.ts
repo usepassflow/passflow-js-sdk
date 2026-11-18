@@ -78,6 +78,24 @@ export class StorageManager {
   }
 
   /**
+   * Whether the stored session is another app's: a stored token that reads as absent here. Its
+   * tokens, ID token, CSRF token, scopes, delivery mode and hosted sign-in record are that app's,
+   * so this instance's clearing leaves them in place.
+   */
+  private holdsOtherAppSession(): boolean {
+    if (!this.appId) return false;
+    return [
+      this.getKeyForTokenType(TokenType.access_token),
+      this.getKeyForTokenType(TokenType.refresh_token),
+      this.getKeyForTokenType(TokenType.id_token),
+      this.ID_TOKEN_KEY,
+    ].some((key) => {
+      const value = this.storage.getItem(key);
+      return !!value && this.ownToken(value) === undefined;
+    });
+  }
+
+  /**
    * Save tokens to storage with conditional logic based on delivery mode
    * In cookie/BFF mode: ONLY save ID token (not access/refresh tokens)
    * In JSON mode: save all tokens (existing behavior)
@@ -159,6 +177,7 @@ export class StorageManager {
   }
 
   deleteTokens(): void {
+    if (this.holdsOtherAppSession()) return;
     // Clear JSON mode tokens
     this.storage.removeItem(this.getKeyForTokenType(TokenType.id_token));
     this.storage.removeItem(this.getKeyForTokenType(TokenType.access_token));
@@ -305,6 +324,7 @@ export class StorageManager {
    */
   clearIdToken(): void {
     try {
+      if (this.holdsOtherAppSession()) return;
       this.storage.removeItem(this.ID_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors
@@ -341,6 +361,7 @@ export class StorageManager {
    */
   clearCsrfToken(): void {
     try {
+      if (this.holdsOtherAppSession()) return;
       this.storage.removeItem(this.CSRF_TOKEN_KEY);
     } catch (_error) {
       // Silently ignore storage errors

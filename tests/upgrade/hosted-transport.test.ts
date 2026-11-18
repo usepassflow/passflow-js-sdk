@@ -297,4 +297,33 @@ describe('hosted upgrade cookie-only transport', () => {
       disable();
     }
   });
+
+  test('a repeated max_age requirement prompts again once max_age seconds have passed since the proof', async () => {
+    const f = start();
+    let prompts = 0;
+    const disable = f.passflow.hostedUpgrade.enable({
+      factors: [totpFactor],
+      prompt: async (request) => {
+        prompts++;
+        request.onFactorSelected('totp');
+        return { type: 'submit', factor: 'totp', code: '123456' };
+      },
+    });
+    const fresh = { status: 403, acrValues: '2', requiredLevel: 2, maxAge: 60 };
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
+      now.mockReturnValue(1_000_000 + 59_000);
+      await expect(f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' })).rejects.toBeInstanceOf(
+        UpgradeInsufficientError,
+      );
+      expect(prompts).toBe(1);
+
+      now.mockReturnValue(1_000_000 + 61_000);
+      await f.passflow.hostedUpgrade.elevate(fresh, { kind: 'imperative' });
+      expect(prompts).toBe(2);
+    } finally {
+      disable();
+    }
+  });
 });

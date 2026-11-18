@@ -328,11 +328,18 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
    * to hand back an elevation that belongs to a different session than the
    * challenge did.
    */
-  /** The challenge this page last proved, under `stopRepeatedElevation`. */
-  let lastProven: UpgradeChallenge | undefined;
+  /** The challenge this page last proved and when, under `stopRepeatedElevation`. */
+  let lastProven: { challenge: UpgradeChallenge; at: number } | undefined;
   deps.stopRepeatedElevation?.subscribe(() => {
     lastProven = undefined;
   });
+
+  /** Whether `challenge` is met by the last proof: not stronger, and its `max_age` has not run out since. */
+  const alreadyProven = (challenge: UpgradeChallenge): UpgradeChallenge | undefined => {
+    if (!lastProven || isStrictlyStronger(lastProven.challenge, challenge)) return undefined;
+    if (challenge.maxAge !== undefined && Date.now() - lastProven.at > challenge.maxAge * 1000) return undefined;
+    return lastProven.challenge;
+  };
 
   const elevateFor = async (challenge: UpgradeChallenge, waiter: Waiter): Promise<UpgradeElevation> => {
     const current = installation;
@@ -342,8 +349,8 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       throw new UpgradeUnavailableError('Step-up verification is not enabled on this Passflow instance');
     }
 
-    const proven = lastProven;
-    if (deps.stopRepeatedElevation && proven && !isStrictlyStronger(proven, challenge)) {
+    const proven = deps.stopRepeatedElevation ? alreadyProven(challenge) : undefined;
+    if (proven) {
       throw new UpgradeInsufficientError(
         barOf(proven),
         barOf(challenge),
@@ -370,7 +377,7 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
       throw new UpgradeSessionChangedError();
     }
 
-    if (deps.stopRepeatedElevation) lastProven = challenge;
+    if (deps.stopRepeatedElevation) lastProven = { challenge, at: Date.now() };
     return elevation;
   };
 

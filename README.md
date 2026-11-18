@@ -2,6 +2,58 @@
 
 ## Changelog
 
+### Version 0.31.0
+
+Matches the SDK to the server's real two-factor, step-up and sign-out answers.
+
+**Breaking:**
+- `getTwoFactorEnrollment()` returns `{ enrollment, totp_digits?, totp_period? }`, not the bare string.
+- 2FA types follow the server: status has no `policy`; confirm is `{ enabled, recovery_codes? }`,
+  disable `{ disabled }`, regenerate `{ recovery_codes }`; `remaining_recovery_codes` is optional;
+  `requires_2fa` and `device_trusted` are gone (a `tfa_token` marks a pending second factor).
+  `getAvailableMethods()` and `getRegisteredMethods()` return the arrays, not the server's wrapper.
+- `TwoFactorDeviceTrusted` is no longer emitted (`@deprecated`): device trust is a server cookie.
+- A sign-up that signs the user in emits `Register` and then `SignIn`; `verifyV2` emits `SignIn`
+  after `TwoFactorVerified` when it completes a sign-in.
+- After a hosted sign-in (`authRedirect()`), `logOut()` also ends the hosted login's session: after
+  the local sign-out it navigates to `/oidc/end_session` with `id_token_hint` and
+  `post_logout_redirect_uri` (default: where the sign-in landed; `logOut({ postLogoutRedirectUri })`
+  overrides it, and it must match a registered redirect URL). Code after `await logOut()` may not run.
+- Stored tokens whose `aud` does not name this instance's app id no longer count as a session, and
+  this app's sign-out leaves another app's stored session in place.
+- `session({ createSession, expiredSession })` now runs for every completed sign-in, including
+  `signIn`, `signUp`, `passkeyRegister` and v2 verify.
+- Step-up offers exactly the factors in the server's `available_factors`, in its order
+  (`UpgradeChallenge.availableFactors?`); without the field it suggests TOTP before passkey.
+- A 429 on a step-up round is `UpgradeTransportError` kind `rate_limited` (it was `fatal`), with the
+  server's message and `retryAfter` from `Retry-After`; the surfaces settle it as exhausted.
+
+**New:**
+- `UpgradeSignInRequiredError` (`upgrade_sign_in_required`) and `isUpgradeSignInRequired(res)`: the
+  step-up 403's `sign_in_required: true` (`prompt=login`, `max_age=0`; from older servers, an empty
+  `available_factors`) means only a fresh sign-in can meet it. No prompt opens; an open prompt is
+  closed through the new optional `onClosed`. An empty list with `sign_in_required: false` is
+  `UpgradeUnsatisfiableError`: no factor of this account reaches the level.
+- `passflow.hostedUpgrade` refuses to re-prove a requirement it proved in the last 10 seconds (or
+  within its `max_age`, if shorter) with `UpgradeInsufficientError`, so a refused proof cannot loop.
+  A sign-in or sign-out clears it. This relies on the server rejecting an elevation window under
+  10 seconds.
+- `PassflowPasswordChangeRequiredError` and `PASSWORD_CHANGE_REQUIRED_ERROR_ID` for a 403
+  `error.api.password.change.required`.
+- `device_trust_available?` on the v2 challenge and the enrolment answer; `redirect_url?` and
+  `form_post?` on the v1 and v2 verify answers for a sign-in with an OIDC parent.
+
+**Fixed:**
+- The TOTP digit count is read from enrolment and the v2 challenge too, so an 8-digit enrolment works
+  on a fresh sign-in; the count resets with each new second-factor step.
+- `verifyV2` completes the sign-in (it waited for a `success` field the server never sends).
+- Recovery codes are checked only for their form; the server decides.
+- `PassflowError.name` is `'PassflowError'`. Fields `GET /app/settings` no longer sends are optional.
+
+**Known limit:** a cookie or BFF session that stores no ID token makes another app's session
+undetectable, so this app's `logOut()` clears the shared delivery mode and session state. It fails
+safe: the other app is signed out, never wrongly signed in.
+
 ### Version 0.30.1
 
 - Fixed: `setAppId()` on an instance built with an `appId` now changes the `X-Passflow-ClientID`

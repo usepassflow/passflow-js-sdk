@@ -97,16 +97,14 @@ export function isValidTOTPCode(code: string, digits: 6 | 8 = 6): boolean {
   return pattern.test(code);
 }
 
-/** Fewest characters a recovery code has once its dashes are removed. */
-export const MIN_RECOVERY_CODE_LENGTH = 10;
-
 /** Most characters a recovery code may have, dashes included: a sanity bound on input. */
 export const MAX_RECOVERY_CODE_LENGTH = 64;
 
 /**
- * Normalizes and validates a recovery code: upper-cases it and removes whitespace.
- * Codes are issued as XXXX-XXXX-XXXX (12 characters) and have at least
- * {@link MIN_RECOVERY_CODE_LENGTH} characters; dashes are optional.
+ * Normalizes and checks the form of a recovery code: upper-cases it and removes whitespace.
+ * Codes are issued as XXXX-XXXX-XXXX; older codes, such as 8-character XXXX-XXXX ones, stay valid
+ * until they are regenerated. Only the form is checked here (letters, digits and optional dashes,
+ * at most {@link MAX_RECOVERY_CODE_LENGTH} characters): whether the code is one is the server's to say.
  *
  * @param code - The recovery code to normalize and validate
  * @returns Normalized recovery code if valid, null if invalid
@@ -117,7 +115,7 @@ export function normalizeRecoveryCode(code: string): string | null {
   const normalized = code.toUpperCase().replace(/\s+/g, '');
 
   if (normalized.length > MAX_RECOVERY_CODE_LENGTH || !/^[A-Z0-9-]+$/.test(normalized)) return null;
-  if (normalized.replace(/-/g, '').length < MIN_RECOVERY_CODE_LENGTH) return null;
+  if (normalized.replace(/-/g, '') === '') return null;
 
   return normalized;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { normalizeRecoveryCode } from '../../lib/utils/validation';
 
-// REGRESSION: recovery codes follow the server format, XXXX-XXXX-XXXX by default and at least 10 characters
+// REGRESSION: codes are issued as XXXX-XXXX-XXXX, but older 8-character codes stay valid: the server decides
 describe('normalizeRecoveryCode', () => {
   test('upper-cases a lower-case code and keeps its dashes', () => {
     expect(normalizeRecoveryCode('abcd-efgh-jkmn')).toBe('ABCD-EFGH-JKMN');
@@ -15,8 +15,20 @@ describe('normalizeRecoveryCode', () => {
     expect(normalizeRecoveryCode('ABCD-EFGH-JKMN-PQRS')).toBe('ABCD-EFGH-JKMN-PQRS');
   });
 
-  test('refuses a code with fewer than 10 characters once the dashes are gone', () => {
-    expect(normalizeRecoveryCode('ABCD-1234')).toBeNull();
+  test('accepts an older 8-character XXXX-XXXX code: the server still matches it', () => {
+    expect(normalizeRecoveryCode('abcd-1234')).toBe('ABCD-1234');
+  });
+
+  test('refuses a code of dashes only', () => {
+    expect(normalizeRecoveryCode('--')).toBeNull();
+  });
+
+  test('refuses a code with characters outside letters, digits and dashes', () => {
+    expect(normalizeRecoveryCode('ABCD_1234')).toBeNull();
+  });
+
+  test('refuses a code longer than 64 characters', () => {
+    expect(normalizeRecoveryCode('A'.repeat(65))).toBeNull();
   });
 
   test('refuses an empty code', () => {

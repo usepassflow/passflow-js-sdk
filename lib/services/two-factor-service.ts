@@ -322,7 +322,7 @@ export class TwoFactorService {
       // Normalize and validate recovery code format
       const normalizedCode = normalizeRecoveryCode(code);
       if (!normalizedCode) {
-        throw new Error('Invalid recovery code format. Expected format: XXXX-XXXX-XXXX (letters and digits).');
+        throw new Error('Invalid recovery code format. Expected letters, digits and dashes, such as XXXX-XXXX-XXXX.');
       }
 
       // Attempt to recover partial auth state from sessionStorage

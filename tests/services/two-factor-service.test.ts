@@ -773,12 +773,23 @@ describe('TwoFactorService', () => {
       expect(emitted).toContain(PassflowEvent.TwoFactorVerified);
     });
 
-    // REGRESSION: a code shorter than the server's minimum is refused locally, naming the server format
-    test('a code with fewer than 10 characters is refused before any request', async () => {
+    // REGRESSION: an older 8-character code reaches the server, which still accepts it
+    test('an older 8-character XXXX-XXXX code is sent to the server', async () => {
       twoFactorService.setPartialAuthState('user@example.com', 'challenge-123', 'tfa-token-123');
       mockTwoFactorApi.useRecoveryCode.mockResolvedValue({ access_token: 'mock-access-token', success: true });
 
-      await expect(twoFactorService.useRecoveryCode('ABCD-1234')).rejects.toThrow('XXXX-XXXX-XXXX');
+      await twoFactorService.useRecoveryCode('abcd-1234');
+
+      expect(mockTwoFactorApi.useRecoveryCode).toHaveBeenCalledWith({
+        recovery_code: 'ABCD-1234',
+        tfa_token: 'tfa-token-123',
+      });
+    });
+
+    test('a code with characters other than letters, digits and dashes is refused before any request', async () => {
+      twoFactorService.setPartialAuthState('user@example.com', 'challenge-123', 'tfa-token-123');
+
+      await expect(twoFactorService.useRecoveryCode('ABCD_1234!')).rejects.toThrow('letters, digits and dashes');
       expect(mockTwoFactorApi.useRecoveryCode).not.toHaveBeenCalled();
     });
 

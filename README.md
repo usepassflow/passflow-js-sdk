@@ -718,8 +718,9 @@ switch (enrollment) {
   code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until
   an answer gives the count, `verifyTwoFactor` accepts 6 or 8 digits and the server decides. The
   count lasts one sign-in.
-- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). The SDK accepts at least 10
-  letters and digits, with or without dashes, and upper-cases them. `remaining_recovery_codes` may be
+- **Recovery codes** are issued as `XXXX-XXXX-XXXX` (12 characters). Older 8-character `XXXX-XXXX`
+  codes still work until they are regenerated. The SDK checks only the form (letters, digits and
+  optional dashes) and upper-cases the code; the server decides whether it is valid. `remaining_recovery_codes` may be
   absent from the answer.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.

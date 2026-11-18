@@ -714,7 +714,8 @@ switch (enrollment) {
 ```
 
 - **Trusted devices.** `device_trust_available` on the enrolment and on a v2 challenge says whether
-  to offer "trust this device" (`trust_device`) on this sign-in.
+  to offer "trust this device" (`trust_device`) on this sign-in. Older servers leave it out: absent
+  means unknown, so hide the option only when it is `false`.
 - **TOTP digits.** Read `getTwoFactorEnrollment()` before asking for the code. With a TOTP
   enrolment it answers `totp_digits` (6 or 8) and `totp_period`, as does `requestChallenge`: size the
   code input from `totp_digits`, and `verifyTwoFactor` then expects exactly that many digits. Until

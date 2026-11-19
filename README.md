@@ -73,9 +73,9 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
 
 **Known limits:**
 - The `hostedUpgrade` memory assumes the app's elevation window (`auth_assurance.elevation_max_age`)
-  is at least 10 seconds. Servers up to src/v0.49.1, the current release, accept any window, so the
-  10 s minimum does not apply on them. src/v0.50.0, the next server release (not yet released),
-  refuses new windows under 10 seconds but keeps a shorter one already stored. With a window under
+  is at least 10 seconds. Servers before src/v0.50.0 accept any window, so the 10 s minimum does not
+  apply on them. src/v0.50.0 (not yet released) refuses new windows under 10 seconds but keeps a
+  shorter one already stored. With a window under
   10 seconds, a re-challenge for the same requirement within 10 seconds of the proof is refused with
   `UpgradeInsufficientError`, costing the user one extra sign-in. Keep every window at 10 seconds or
   more, and re-save any shorter one.
@@ -840,9 +840,9 @@ switch (enrollment) {
   requirement's `max_age`, if shorter): after that the same requirement prompts again. A sign-in or
   sign-out clears it. Keep the app's elevation window (`auth_assurance.elevation_max_age`) at 10
   seconds or more: a shorter window can lapse inside those 10 seconds, and the re-challenge is then
-  refused, costing one extra sign-in. Servers up to src/v0.49.1 accept any window. src/v0.50.0, the
-  next server release (not yet released), refuses new windows under 10 seconds; after upgrading,
-  re-save any shorter one already stored.
+  refused, costing one extra sign-in. Servers before src/v0.50.0 accept any window. src/v0.50.0 (not
+  yet released) refuses new windows under 10 seconds; after upgrading, re-save any shorter one
+  already stored.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,

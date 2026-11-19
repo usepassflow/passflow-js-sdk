@@ -2,6 +2,16 @@
 
 ## Changelog
 
+### Version 0.32.0
+
+- `passflow.withAuth(fetch, { origins })`, `passflow.attachAuth(axios, { origins })` and
+  `passflow.createClient(config, { origins })` add `Authorization: Bearer <access token>` to a request
+  for the page's own origin or a listed origin when the request has no `Authorization` header,
+  refreshing an expired token first. Other origins get no token. Before, they only handled step-up,
+  so a request without the header now carries one. See
+  [Calling your API with the access token](#calling-your-api-with-the-access-token).
+- `WithAuthOptions` is exported.
+
 ### Version 0.31.0
 
 Matches the SDK to the server's real two-factor, step-up and sign-out answers.
@@ -63,9 +73,9 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
 
 **Known limits:**
 - The `hostedUpgrade` memory assumes the app's elevation window (`auth_assurance.elevation_max_age`)
-  is at least 10 seconds. Servers up to src/v0.49.1, the current release, accept any window, so the
-  10 s minimum does not apply on them. src/v0.50.0, the next server release (not yet released),
-  refuses new windows under 10 seconds but keeps a shorter one already stored. With a window under
+  is at least 10 seconds. Servers before src/v0.50.0 accept any window, so the 10 s minimum does not
+  apply on them. src/v0.50.0 (not yet released) refuses new windows under 10 seconds but keeps a
+  shorter one already stored. With a window under
   10 seconds, a re-challenge for the same requirement within 10 seconds of the proof is refused with
   `UpgradeInsufficientError`, costing the user one extra sign-in. Keep every window at 10 seconds or
   more, and re-save any shorter one.
@@ -830,9 +840,9 @@ switch (enrollment) {
   requirement's `max_age`, if shorter): after that the same requirement prompts again. A sign-in or
   sign-out clears it. Keep the app's elevation window (`auth_assurance.elevation_max_age`) at 10
   seconds or more: a shorter window can lapse inside those 10 seconds, and the re-challenge is then
-  refused, costing one extra sign-in. Servers up to src/v0.49.1 accept any window. src/v0.50.0, the
-  next server release (not yet released), refuses new windows under 10 seconds; after upgrading,
-  re-save any shorter one already stored.
+  refused, costing one extra sign-in. Servers before src/v0.50.0 accept any window. src/v0.50.0 (not
+  yet released) refuses new windows under 10 seconds; after upgrading, re-save any shorter one
+  already stored.
 - **The server decides.** Setup calls in the wrong state answer 403 `error.2fa.enrollment.not_allowed`.
 - **The sign-in is over** on a 401 `error.tfa.token.invalid` or `error.otp.already.used`: sign in again.
 - **Rate limits are per user.** `sendTwoFactorSetupLink`, `beginTwoFactorEnrollment`,
@@ -909,6 +919,44 @@ with nothing saved. Verification needs the Web Crypto API (https or localhost). 
 `state` when the URL had one. A federated popup that returns tokens in its callback URL (query or
 fragment) follows the same Simple-only rule and is verified the same way; on a PKCE app it requires a
 code.
+
+### Calling your API with the access token
+
+`passflow.withAuth(fetch, options?)` returns a `fetch` that adds `Authorization: Bearer <access
+token>` for you, and handles a step-up challenge on the answer. `passflow.attachAuth(axios, options?)`
+and `passflow.createClient(axiosConfig?, options?)` do the same for axios, with a request interceptor
+next to the step-up one; `attachAuth`'s disposer removes both.
+
+```javascript
+const api = passflow.withAuth(fetch, { origins: ["https://api.example.com"] });
+const res = await api("https://api.example.com/orders"); // carries the token
+await api("/api/me"); // the page's own origin: carries the token
+await api("https://cdn.example.net/data.json"); // any other origin: no token
+
+const client = passflow.createClient({ baseURL: "https://api.example.com" }, { origins: ["https://api.example.com"] });
+await client.get("/orders"); // carries the token
+```
+
+- The token goes only to the page's own origin (`location.origin`) and to the origins in
+  `options.origins`. Origins are compared exactly, scheme, host and port: `https://api.example.com`
+  does not cover `http://api.example.com`, `https://api.example.com:8443` or
+  `https://api.example.com.evil.com`. A relative URL resolves against the page. On axios the check
+  uses the URL axios sends: a relative URL is joined to `baseURL`, an absolute one is judged by its own
+  origin, and with `allowAbsoluteUrls: false` an absolute one is joined to `baseURL` too. Outside a
+  browser page (SSR, React Native) only the listed origins get it. List http(s) origins only: an
+  `origins` entry that is not a URL, or has no origin to match (`capacitor://localhost`, `file:`, a
+  custom app scheme), throws.
+- A request that already has an `Authorization` header goes out as you set it, including an axios
+  client default.
+- An expired access token is refreshed first, as `getTokens(true)` does. With no signed-in user, or
+  when the refresh fails (the expired token is never sent), no header is added.
+- On an axios instance you already own, a request interceptor you added before `attachAuth` runs
+  after the token one (axios runs request interceptors last-added first). If it rewrites `baseURL`
+  or `url`, the request goes where it points, with the token decided for the URL before the rewrite.
+  Add such interceptors after `attachAuth`, or set the header in them yourself.
+- Requires axios 1.x. On 0.27.x the interceptor cannot see a client default
+  `defaults.headers.common.Authorization`, so the token replaces it.
+- A cookie or BFF session holds no access token in the page, so nothing is added there.
 
 ### Token refresh across tabs
 

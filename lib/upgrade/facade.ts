@@ -43,6 +43,7 @@ import { FETCH_PRIORITY_UPGRADE, registerFetchMiddleware } from '../interceptors
 import type { PlatformAdapter } from '../platform';
 
 import { readAcrValues } from './acr';
+import { type AccessTokenReader, axiosAccessTokenInterceptor, type WithAuthOptions, withAccessToken } from './attach-token';
 import { type AxiosReissue, attachUpgradeAuth, createAxiosUpgradeHandler, type ResponseInterceptorHost } from './axios-adapter';
 import type { AssuranceBar, UpgradeChallenge, UpgradeDiagnosticSink } from './challenge';
 import {
@@ -114,6 +115,12 @@ export type UpgradeFacadeDeps = UpgradeTransportDeps & {
    * prompt after prompt. `subscribe` clears the memory (sign-in, sign-out).
    */
   stopRepeatedElevation?: { subscribe: (listener: () => void) => () => void };
+  /**
+   * The current access token, refreshed first when it has expired, or `undefined` with no
+   * signed-in user. With it, `withAuth` adds `Authorization: Bearer <token>` to requests for the
+   * page's own origin and the listed ones; without it (the hosted cookie session) it adds nothing.
+   */
+  readAccessToken?: () => Promise<string | undefined>;
 };
 
 /**
@@ -197,10 +204,17 @@ export type UpgradeFacade = {
    * prompt, because they share one controller.
    */
   elevate(challenge: UpgradeChallenge, waiter?: Waiter): Promise<UpgradeElevation>;
-  /** Wraps a fetch and returns the wrapper. Touches no global. */
-  withAuth(next?: FetchLike): FetchLike;
+  /**
+   * Wraps a fetch and returns the wrapper. Touches no global. Adds the access token to requests for
+   * the page's own origin and `options.origins` that carry no `Authorization` header.
+   */
+  withAuth(next?: FetchLike, options?: WithAuthOptions): FetchLike;
   /** Attaches to an axios instance the developer owns, MUTATING it. Returns `detach()`. */
-  attachAuth(instance: ResponseInterceptorHost): () => void;
+  /**
+   * Attaches step-up handling to an axios instance and, under the same rule as `withAuth`, a
+   * request interceptor that adds the access token. Returns a disposer that removes both.
+   */
+  attachAuth(instance: ResponseInterceptorHost, options?: WithAuthOptions): () => void;
 };
 
 /** `backend` as declared → the list the scope predicate reads. */
@@ -527,11 +541,17 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
     },
     withAuth: {
       enumerable: true,
-      value: (next?: FetchLike): FetchLike => {
+      value: (next?: FetchLike, options?: WithAuthOptions): FetchLike => {
+        // The token goes on OUTSIDE the step-up layer, so the request it plans to replay already
+        // carries it and the credential swap after an elevation finds the token it replaces.
+        const authed = (fetch: FetchLike): FetchLike => {
+          const stepUp = upgradeFetch(fetch, interceptorOptions);
+          return deps.readAccessToken ? withAccessToken(stepUp, deps.readAccessToken, options) : stepUp;
+        };
         if (next) {
           // The developer's own function, wrapped as given: binding it would
           // change its `this` and break a method-shaped fetch.
-          return upgradeFetch(next, interceptorOptions);
+          return authed(next);
         }
         // Resolved inside the call, never at module or construction scope:
         // reading a global while a module is being imported is the SSR failure.
@@ -539,12 +559,22 @@ export const createUpgradeFacade = (deps: UpgradeFacadeDeps): UpgradeFacade => {
         if (!global || typeof global.fetch !== 'function') {
           throw new Error('Passflow: withAuth() needs a fetch to wrap — this runtime has none.');
         }
-        return upgradeFetch(global.fetch.bind(global) as FetchLike, interceptorOptions);
+        return authed(global.fetch.bind(global) as FetchLike);
       },
     },
     attachAuth: {
       enumerable: true,
-      value: (instance: ResponseInterceptorHost): (() => void) => attachUpgradeAuth(instance, interceptorOptions),
+      value: (instance: ResponseInterceptorHost, options?: WithAuthOptions): (() => void) => {
+        const request = deps.readAccessToken ? instance.interceptors.request : undefined;
+        const tokenId = request?.use(axiosAccessTokenInterceptor(deps.readAccessToken as AccessTokenReader, options));
+        const detachStepUp = attachUpgradeAuth(instance, interceptorOptions);
+        return () => {
+          detachStepUp();
+          if (request && tokenId !== undefined) {
+            request.eject(tokenId);
+          }
+        };
+      },
     },
   });
 };

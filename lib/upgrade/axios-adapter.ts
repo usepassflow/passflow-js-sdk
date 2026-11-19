@@ -51,6 +51,12 @@ export type ResponseInterceptorHost = {
       use(onFulfilled?: (value: any) => any, onRejected?: (error: any) => any): number;
       eject(id: number): void;
     };
+    /** Where the access token is added. A client without one gets step-up handling only. */
+    request?: {
+      // biome-ignore lint/suspicious/noExplicitAny: structural mirror of axios' own looser signature; narrowing it here would reject real axios instances
+      use(onFulfilled?: (value: any) => any, onRejected?: (error: any) => any): number;
+      eject(id: number): void;
+    };
   };
 };
 

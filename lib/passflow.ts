@@ -74,7 +74,7 @@ import {
   PassflowStore,
   type PassflowSubscriber,
 } from './store';
-import { parseToken, TokenType } from './token';
+import { isTokenExpired, parseToken, TokenType } from './token';
 import { TokenDeliveryMode } from './token/delivery-manager';
 import { verifyUrlTokens } from './token/verify';
 import type { ParsedTokens, SessionParams, Tokens } from './types';
@@ -87,6 +87,7 @@ import {
   type ResponseInterceptorHost,
   readAcrValues,
   type UpgradeFacade,
+  type WithAuthOptions,
 } from './upgrade';
 import { isValidJWTFormat, sanitizeErrorMessage } from './utils/validation';
 
@@ -297,6 +298,11 @@ export class Passflow {
       },
       attachInternalSeam: (factory) => this.attachUpgradeSeam(factory),
       onSessionChange: (listener) => this.subscribeToSessionChange(listener),
+      // A refresh that fails leaves the expired token in storage; that one is never sent.
+      readAccessToken: async () => {
+        const token = (await this.getTokens(true))?.access_token;
+        return token && !isTokenExpired(parseToken(token)) ? token : undefined;
+      },
     });
 
     // Second facade with its own controller. No seam on the SDK clients, no session-change hook
@@ -384,7 +390,12 @@ export class Passflow {
   }
 
   /**
-   * Wraps a `fetch`, returning a new function with step-up handling attached.
+   * Wraps a `fetch`, returning a new function that adds the access token and handles step-up.
+   *
+   * A request for the page's own origin or one in `options.origins` (compared exactly: scheme, host
+   * and port) that has no `Authorization` header gets `Bearer <access token>`, refreshed first when
+   * it has expired. Any other origin, a request with its own header, and a request with no
+   * signed-in user go out as given.
    *
    * Installs nothing and touches no global — this is the SSR- and
    * React-Native-safe surface. Two verbs exist because the semantics genuinely
@@ -397,20 +408,25 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * const authedFetch = passflow.withAuth(fetch);
+   * const authedFetch = passflow.withAuth(fetch, { origins: ['https://api.example.com'] });
    * const res = await authedFetch('https://api.example.com/transfer', { method: 'POST' });
    * if (!res.ok && isUpgradeCancelled(res)) {
    *   // the user declined the step-up — not an authorization failure
    * }
    * ```
    */
-  withAuth(next?: FetchLike): FetchLike {
-    return this.upgrade.withAuth(next);
+  withAuth(next?: FetchLike, options?: WithAuthOptions): FetchLike {
+    return this.upgrade.withAuth(next, options);
   }
 
   /**
    * Attaches step-up handling to an axios instance the caller already owns,
    * **mutating** it, and returns a `detach()` disposer.
+   *
+   * It also adds a request interceptor with `withAuth`'s rule: a request for the
+   * page's own origin or one in `options.origins` (exact scheme, host and port,
+   * `baseURL` joined as axios does) that has no `Authorization` header gets
+   * `Bearer <access token>`. The disposer removes both interceptors.
    *
    * The parameter is typed structurally — duck-typed on
    * `interceptors.response.use` — so this package's axios version is not a
@@ -421,16 +437,17 @@ export class Passflow {
    * @example
    * ```typescript
    * const api = axios.create({ baseURL: 'https://api.example.com' });
-   * const detach = passflow.attachAuth(api);
+   * const detach = passflow.attachAuth(api, { origins: ['https://api.example.com'] });
    * ```
    */
-  attachAuth(instance: ResponseInterceptorHost): () => void {
-    return this.upgrade.attachAuth(instance);
+  attachAuth(instance: ResponseInterceptorHost, options?: WithAuthOptions): () => void {
+    return this.upgrade.attachAuth(instance, options);
   }
 
   /**
-   * Builds a ready axios instance with step-up handling already wired, for a
-   * caller with no HTTP client of their own.
+   * Builds a ready axios instance with step-up handling and the access token
+   * (as `attachAuth`, with `options.origins`) already wired, for a caller with no
+   * HTTP client of their own.
    *
    * Pure passthrough of axios' own create options, so `baseURL`, `headers`,
    * `timeout` and `adapter` stay the caller's. A `baseURL` is NOT read as a
@@ -439,11 +456,11 @@ export class Passflow {
    *
    * @example
    * ```typescript
-   * const api = passflow.createClient({ baseURL: 'https://api.example.com' });
+   * const api = passflow.createClient({ baseURL: 'https://api.example.com' }, { origins: ['https://api.example.com'] });
    * ```
    */
-  createClient(config?: CreateClientConfig): AxiosInstance {
-    return createUpgradeClient(config, (instance) => this.upgrade.attachAuth(instance));
+  createClient(config?: CreateClientConfig, options?: WithAuthOptions): AxiosInstance {
+    return createUpgradeClient(config, (instance) => this.upgrade.attachAuth(instance, options));
   }
 
   /**

@@ -179,6 +179,7 @@ export type {
   WaiterEntry,
   WaiterOutcome,
   WaiterReport,
+  WithAuthOptions,
 } from './upgrade';
 // Re-export Upgrade (step-up authentication) module
 export {

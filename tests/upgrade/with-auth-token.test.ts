@@ -1,6 +1,6 @@
 import axios, { type AxiosAdapter, AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { AuthAPI } from '../../lib/api';
+import { AuthAPI, PassflowError } from '../../lib/api';
 import { UpgradeAPI } from '../../lib/api/upgrade';
 import { Passflow } from '../../lib/passflow';
 import type { Tokens } from '../../lib/types';
@@ -140,6 +140,38 @@ describe('withAuth(fetch) attaches the access token to allowed origins only', ()
     expect(() => passflow.withAuth(recordingFetch, { origins: ['api.example.com'] })).toThrow();
   });
 
+  test.each([['capacitor://localhost'], ['file:///x'], ['myapp://host']])(
+    'an origins entry without a real origin (%s) throws, so no opaque URL can match it',
+    (entry) => {
+      expect(() => newPassflow(pairOf(1_700_000_000)).withAuth(recordingFetch, { origins: [entry] })).toThrow(/origin/);
+    },
+  );
+
+  test.each([
+    ['a network error', () => Object.assign(new Error('Network Error'), { code: 'ERR_NETWORK' })],
+    [
+      'a 401',
+      () =>
+        new PassflowError({
+          id: 'error.token.invalid.error',
+          message: 'token is invalid',
+          status: 401,
+          location: '/auth/refresh',
+          time: '2026-11-19T00:00:00Z',
+        }),
+    ],
+  ])('when the refresh of an expired token fails with %s, no header is added', async (_name, failure) => {
+    vi.spyOn(AuthAPI.prototype, 'refreshToken').mockRejectedValue(failure());
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const authed = newPassflow(pairOf(1_700_000_000, false)).withAuth(recordingFetch);
+
+    await authed('/api/me');
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.authorization).toBeNull();
+  });
+
   test('signed out: no header is added', async () => {
     const authed = newPassflow().withAuth(recordingFetch);
 
@@ -204,7 +236,11 @@ describe.each(['attachAuth', 'createClient'] as const)(
       return { status: 200, statusText: 'OK', headers: {}, data: 'ok', config };
     };
 
-    const clientFor = (passflow: Passflow, config: { baseURL?: string } = {}, origins?: string[]): AxiosInstance => {
+    const clientFor = (
+      passflow: Passflow,
+      config: { baseURL?: string; allowAbsoluteUrls?: boolean } = {},
+      origins?: string[],
+    ): AxiosInstance => {
       const options = origins ? { origins } : undefined;
       if (surface === 'createClient') return passflow.createClient({ ...config, adapter }, options);
       const client = axios.create({ ...config, adapter });
@@ -292,6 +328,23 @@ describe.each(['attachAuth', 'createClient'] as const)(
 
       expect(refresh).toHaveBeenCalledTimes(1);
       expect(sent.map((s) => s.authorization)).toEqual(Array(2).fill(`Bearer ${fresh.access_token}`));
+    });
+
+    test.each([
+      ['an absolute URL', 'https://api.example.com/x'],
+      ['a protocol-relative URL', '//api.example.com/x'],
+    ])('%s that axios joins onto baseURL (allowAbsoluteUrls: false) is judged by the joined URL', async (_name, url) => {
+      const tokens = pairOf(1_700_000_000);
+      const passflow = newPassflow(tokens);
+      const origins = ['https://api.example.com'];
+
+      await clientFor(passflow, { baseURL: 'https://evil.example', allowAbsoluteUrls: false }, origins).get(url);
+      await clientFor(passflow, { baseURL: 'https://evil.example', allowAbsoluteUrls: true }, origins).get(url);
+
+      expect(sent[0]?.url.startsWith('https://evil.example/')).toBe(true);
+      expect(sent[0]?.authorization).toBeNull();
+      expect(new URL(sent[1]?.url ?? '', own()).origin).toBe('https://api.example.com');
+      expect(sent[1]?.authorization).toBe(`Bearer ${tokens.access_token}`);
     });
 
     test('signed out: no header is added', async () => {

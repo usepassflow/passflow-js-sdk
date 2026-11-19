@@ -74,7 +74,7 @@ import {
   PassflowStore,
   type PassflowSubscriber,
 } from './store';
-import { parseToken, TokenType } from './token';
+import { isTokenExpired, parseToken, TokenType } from './token';
 import { TokenDeliveryMode } from './token/delivery-manager';
 import { verifyUrlTokens } from './token/verify';
 import type { ParsedTokens, SessionParams, Tokens } from './types';
@@ -298,7 +298,11 @@ export class Passflow {
       },
       attachInternalSeam: (factory) => this.attachUpgradeSeam(factory),
       onSessionChange: (listener) => this.subscribeToSessionChange(listener),
-      readAccessToken: async () => (await this.getTokens(true))?.access_token,
+      // A refresh that fails leaves the expired token in storage; that one is never sent.
+      readAccessToken: async () => {
+        const token = (await this.getTokens(true))?.access_token;
+        return token && !isTokenExpired(parseToken(token)) ? token : undefined;
+      },
     });
 
     // Second facade with its own controller. No seam on the SDK clients, no session-change hook

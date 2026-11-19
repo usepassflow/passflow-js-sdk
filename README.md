@@ -940,13 +940,22 @@ await client.get("/orders"); // carries the token
 - The token goes only to the page's own origin (`location.origin`) and to the origins in
   `options.origins`. Origins are compared exactly, scheme, host and port: `https://api.example.com`
   does not cover `http://api.example.com`, `https://api.example.com:8443` or
-  `https://api.example.com.evil.com`. A relative URL resolves against the page; on axios it is joined
-  to `baseURL` first, and an absolute URL is judged by its own origin. Outside a browser page
-  (SSR, React Native) only the listed origins get it. An `origins` entry that is not a URL throws.
+  `https://api.example.com.evil.com`. A relative URL resolves against the page. On axios the check
+  uses the URL axios sends: a relative URL is joined to `baseURL`, an absolute one is judged by its own
+  origin, and with `allowAbsoluteUrls: false` an absolute one is joined to `baseURL` too. Outside a
+  browser page (SSR, React Native) only the listed origins get it. List http(s) origins only: an
+  `origins` entry that is not a URL, or has no origin to match (`capacitor://localhost`, `file:`, a
+  custom app scheme), throws.
 - A request that already has an `Authorization` header goes out as you set it, including an axios
   client default.
 - An expired access token is refreshed first, as `getTokens(true)` does. With no signed-in user, or
-  when the refresh fails, no header is added.
+  when the refresh fails (the expired token is never sent), no header is added.
+- On an axios instance you already own, a request interceptor you added before `attachAuth` runs
+  after the token one (axios runs request interceptors last-added first). If it rewrites `baseURL`
+  or `url`, the request goes where it points, with the token decided for the URL before the rewrite.
+  Add such interceptors after `attachAuth`, or set the header in them yourself.
+- Requires axios 1.x. On 0.27.x the interceptor cannot see a client default
+  `defaults.headers.common.Authorization`, so the token replaces it.
 - A cookie or BFF session holds no access token in the page, so nothing is added there.
 
 ### Token refresh across tabs

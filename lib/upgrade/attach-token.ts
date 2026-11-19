@@ -32,11 +32,23 @@ const pageOrigin = (): string | undefined => {
 };
 
 /**
+ * An `origins` entry reduced to its origin. A scheme with no real origin (`capacitor:`, `file:`, a
+ * custom app scheme) reduces to `"null"`, which every opaque URL shares, so it is refused.
+ */
+const listedOrigin = (entry: string): string => {
+  const origin = new URL(entry).origin;
+  if (origin === 'null') {
+    throw new Error(`Passflow: "${entry}" has no origin a request can be matched against; list http(s) origins only.`);
+  }
+  return origin;
+};
+
+/**
  * The token to send with a request to `url` that has, or has not, its own `Authorization` header:
  * the shared decision behind every surface.
  */
 export const createTokenDecision = (readAccessToken: AccessTokenReader, options?: WithAuthOptions) => {
-  const listed = (options?.origins ?? []).map((origin) => new URL(origin).origin);
+  const listed = (options?.origins ?? []).map(listedOrigin);
 
   return (url: string, hasAuthorization: boolean): Promise<string | undefined> => {
     if (hasAuthorization) return Promise.resolve(undefined);
@@ -76,7 +88,7 @@ export const withAccessToken = (next: FetchLike, readAccessToken: AccessTokenRea
 };
 
 /** The subset of an axios request config the request interceptor reads and writes. */
-type AxiosRequestLike = { url?: string; baseURL?: string; headers?: unknown };
+type AxiosRequestLike = { url?: string; baseURL?: string; allowAbsoluteUrls?: boolean; headers?: unknown };
 
 type HeaderBag = {
   has?: (name: string) => boolean;
@@ -84,11 +96,15 @@ type HeaderBag = {
   [name: string]: unknown;
 };
 
-/** The request's full URL, joined from `baseURL` and `url` as axios does. */
+/**
+ * The URL axios will send, joined as its `buildFullPath` does: onto `baseURL` when `url` is relative,
+ * and also when it is absolute but `allowAbsoluteUrls` is `false`.
+ */
 const axiosUrl = (config: AxiosRequestLike): string => {
   const url = config.url ?? '';
-  if (!config.baseURL || /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url)) return url;
-  return url ? `${config.baseURL.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}` : config.baseURL;
+  const absolute = /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url);
+  if (!config.baseURL || (absolute && config.allowAbsoluteUrls !== false)) return url;
+  return url ? `${config.baseURL.replace(/\/?\/$/, '')}/${url.replace(/^\/+/, '')}` : config.baseURL;
 };
 
 const hasAuthorizationHeader = (headers: HeaderBag | undefined): boolean => {

@@ -150,4 +150,27 @@ describe('device id', () => {
       expect(storageManager.getDeviceId()).toBeUndefined();
     });
   });
+
+  describe('storage that keeps nothing (server rendering)', () => {
+    const noopStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+
+    test('every request of one Passflow sends the same device id, minted once', async () => {
+      const passflow = new Passflow({
+        url: URL,
+        appId: APP_ID,
+        refreshCoordination: 'none',
+        platform: createMockPlatform({ storage: noopStorage }),
+      });
+
+      await passflow.getSettingsAll();
+      await passflow.getAppSettings();
+      await passflow.getSettingsAll();
+
+      expect(sent).toHaveLength(3);
+      const first = deviceHeader(sent[0]);
+      expect(first).toBeTruthy();
+      expect(sent.map(deviceHeader)).toEqual([first, first, first]);
+      expect(randomUUID).toHaveBeenCalledTimes(1);
+    });
+  });
 });

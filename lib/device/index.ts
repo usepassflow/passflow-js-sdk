@@ -14,6 +14,8 @@ import { StorageManager } from '../storage';
 
 export class DeviceService {
   private storageManager: StorageManager;
+  /** The id this service minted; used when the storage keeps nothing (server rendering). */
+  private mintedDeviceId: string | undefined;
 
   constructor(storageManager?: StorageManager) {
     this.storageManager = storageManager ?? new StorageManager();
@@ -21,12 +23,10 @@ export class DeviceService {
 
   getDeviceId(): string {
     const deviceId = this.storageManager.getDeviceId();
-    if (!deviceId) {
-      const newDeviceId = this.generateUniqueDeviceId();
-      this.storageManager.setDeviceId(newDeviceId);
-      return newDeviceId;
-    }
-    return deviceId;
+    if (deviceId) return deviceId;
+    this.mintedDeviceId ??= this.generateUniqueDeviceId();
+    this.storageManager.setDeviceId(this.mintedDeviceId);
+    return this.mintedDeviceId;
   }
 
   generateUniqueDeviceId(): string {

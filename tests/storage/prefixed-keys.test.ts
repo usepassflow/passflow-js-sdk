@@ -62,6 +62,15 @@ describe('prefixed storage keys', () => {
       expect(storage.getItem(LEGACY_KEY)).toBeNull();
       expect(storageManager.getScopes()).toBeUndefined();
     });
+
+    test('a stored empty scope list is kept, not replaced by unprefixed scopes', () => {
+      storage.setItem(LEGACY_KEY, 'old');
+      storage.setItem(PREFIXED_KEY, '');
+      const storageManager = new StorageManager({ storage, prefix: PREFIX });
+
+      expect(storageManager.getScopes()).not.toEqual(['old']);
+      expect(storage.getItem(PREFIXED_KEY)).toBe('');
+    });
   });
 
   describe('invitation token', () => {

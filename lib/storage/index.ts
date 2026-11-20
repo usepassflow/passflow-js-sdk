@@ -89,7 +89,7 @@ export class StorageManager {
    */
   private readPrefixed(key: string, name: string): string | undefined {
     const value = this.storage.getItem(key);
-    if (value || key === name) return value ?? undefined;
+    if (value !== null || key === name) return value ?? undefined;
     const unprefixed = this.storage.getItem(name);
     if (!unprefixed) return undefined;
     this.storage.setItem(key, unprefixed);

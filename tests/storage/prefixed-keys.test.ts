@@ -146,4 +146,65 @@ describe('prefixed storage keys', () => {
       expect(storageManager.getPreviousRedirectUrl()).toBeUndefined();
     });
   });
+
+  describe('both keys set: the prefixed value wins and the unprefixed one is left alone', () => {
+    test('invitation token', () => {
+      storage.setItem('passflowInvitationToken', 'old-invite');
+      storage.setItem('myapp_passflowInvitationToken', 'current-invite');
+      const storageManager = new StorageManager({ storage, prefix: PREFIX });
+
+      expect(storageManager.getInvitationToken()).toBe('current-invite');
+      expect(storage.getItem('passflowInvitationToken')).toBe('old-invite');
+    });
+
+    test('previous redirect URL', () => {
+      storage.setItem('passflowPreviousRedirectUrl', 'https://app.example.com/old');
+      storage.setItem('myapp_passflowPreviousRedirectUrl', 'https://app.example.com/current');
+      const storageManager = new StorageManager({ storage, prefix: PREFIX });
+
+      expect(storageManager.getPreviousRedirectUrl()).toBe('https://app.example.com/current');
+      expect(storage.getItem('passflowPreviousRedirectUrl')).toBe('https://app.example.com/old');
+    });
+  });
+
+  describe('without a prefix the keys are unchanged and read and deleted in place', () => {
+    test('scopes', () => {
+      storage.setItem('tokens_scopes', 'id,email');
+      const storageManager = new StorageManager({ storage });
+
+      expect(storageManager.scopes).toBe('tokens_scopes');
+      expect(storageManager.getScopes()).toEqual(['id', 'email']);
+      expect([...storage.data.keys()]).toEqual(['tokens_scopes']);
+
+      storageManager.deleteTokens();
+
+      expect(storage.getItem('tokens_scopes')).toBeNull();
+    });
+
+    test('invitation token', () => {
+      storage.setItem('passflowInvitationToken', 'invite');
+      const storageManager = new StorageManager({ storage });
+
+      expect(storageManager.invitationToken).toBe('passflowInvitationToken');
+      expect(storageManager.getInvitationToken()).toBe('invite');
+      expect([...storage.data.keys()]).toEqual(['passflowInvitationToken']);
+
+      storageManager.deleteInvitationToken();
+
+      expect(storage.getItem('passflowInvitationToken')).toBeNull();
+    });
+
+    test('previous redirect URL', () => {
+      storage.setItem('passflowPreviousRedirectUrl', 'https://app.example.com/a');
+      const storageManager = new StorageManager({ storage });
+
+      expect(storageManager.previousRedirectUrl).toBe('passflowPreviousRedirectUrl');
+      expect(storageManager.getPreviousRedirectUrl()).toBe('https://app.example.com/a');
+      expect([...storage.data.keys()]).toEqual(['passflowPreviousRedirectUrl']);
+
+      storageManager.deletePreviousRedirectUrl();
+
+      expect(storage.getItem('passflowPreviousRedirectUrl')).toBeNull();
+    });
+  });
 });

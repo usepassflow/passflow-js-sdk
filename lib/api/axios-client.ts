@@ -216,11 +216,8 @@ export class AxiosClient {
       };
     }
 
-    // Add device headers
-    const deviceId = this.deviceService.getDeviceId();
     this.defaultHeaders = {
       ...this.defaultHeaders,
-      [DEVICE_ID_HEADER_KEY]: deviceId,
       [DEVICE_TYPE_HEADER_KEY]: this._platform.getDeviceType(),
     };
 
@@ -233,6 +230,9 @@ export class AxiosClient {
     });
 
     this.instance.interceptors.request.use(async (axiosConfig: InternalAxiosRequestConfig) => {
+      // Read per request, so constructing a client never reads or creates the device id.
+      axiosConfig.headers[DEVICE_ID_HEADER_KEY] = this.deviceService.getDeviceId();
+
       // Request to non-access token endpoints, one that brings its own credential, or one of the
       // hosted session's cookie-only calls, where the stored token session must not appear at all
       if (this.isNonAuthEndpoint(axiosConfig.url) || hasOwnBearer(axiosConfig) || isHostedSessionEndpoint(axiosConfig.url)) {

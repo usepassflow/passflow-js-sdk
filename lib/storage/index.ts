@@ -25,12 +25,18 @@ export interface StorageManagerParams {
   appId?: string;
 }
 
+// Unprefixed key names; with a storage prefix the key is `${prefix}_${name}`.
+const SCOPES_KEY = 'tokens_scopes';
+const DEVICE_ID_KEY = 'passflowDeviceId';
+const INVITATION_TOKEN_KEY = 'passflowInvitationToken';
+const PREVIOUS_REDIRECT_URL_KEY = 'passflowPreviousRedirectUrl';
+
 export class StorageManager {
   private keyStoragePrefix = '';
-  readonly scopes = `${this.keyStoragePrefix}tokens_scopes`;
-  readonly deviceId = `${this.keyStoragePrefix}passflowDeviceId`;
-  readonly invitationToken = `${this.keyStoragePrefix}passflowInvitationToken`;
-  readonly previousRedirectUrl = `${this.keyStoragePrefix}passflowPreviousRedirectUrl`;
+  readonly scopes: string;
+  readonly deviceId: string;
+  readonly invitationToken: string;
+  readonly previousRedirectUrl: string;
 
   // Namespaced keys for cookie mode support
   private readonly STORAGE_PREFIX = 'passflow_';
@@ -44,6 +50,10 @@ export class StorageManager {
   constructor({ storage, prefix, appId }: StorageManagerParams = {}) {
     this.storage = storage ?? localStorage;
     this.keyStoragePrefix = prefix ? `${prefix}_` : '';
+    this.scopes = `${this.keyStoragePrefix}${SCOPES_KEY}`;
+    this.deviceId = `${this.keyStoragePrefix}${DEVICE_ID_KEY}`;
+    this.invitationToken = `${this.keyStoragePrefix}${INVITATION_TOKEN_KEY}`;
+    this.previousRedirectUrl = `${this.keyStoragePrefix}${PREVIOUS_REDIRECT_URL_KEY}`;
     this.appId = appId || undefined;
   }
 
@@ -71,6 +81,26 @@ export class StorageManager {
     if (aud === undefined) return value;
     const audience = Array.isArray(aud) ? aud : [aud];
     return audience.includes(this.appId) ? value : undefined;
+  }
+
+  /**
+   * The value under `key`, the prefixed form of `name`. Earlier versions stored it under the
+   * unprefixed `name`: such a value is moved to `key` on first read.
+   */
+  private readPrefixed(key: string, name: string): string | undefined {
+    const value = this.storage.getItem(key);
+    if (value !== null || key === name) return value ?? undefined;
+    const unprefixed = this.storage.getItem(name);
+    if (!unprefixed) return undefined;
+    this.storage.setItem(key, unprefixed);
+    this.storage.removeItem(name);
+    return unprefixed;
+  }
+
+  /** Removes `key` and the unprefixed `name`, so an old value is not read again. */
+  private removePrefixed(key: string, name: string): void {
+    this.storage.removeItem(key);
+    if (key !== name) this.storage.removeItem(name);
   }
 
   private readToken(key: string): string | undefined {
@@ -162,12 +192,12 @@ export class StorageManager {
       access_token: access,
       id_token: this.readToken(this.getKeyForTokenType(TokenType.id_token)),
       refresh_token: this.readToken(this.getKeyForTokenType(TokenType.refresh_token)),
-      scopes: this.storage.getItem(this.scopes)?.split(',') ?? undefined,
+      scopes: this.getScopes(),
     };
   }
 
   getScopes(): string[] | undefined {
-    return this.storage.getItem(this.scopes)?.split(',') ?? undefined;
+    return this.readPrefixed(this.scopes, SCOPES_KEY)?.split(',');
   }
 
   /**
@@ -205,7 +235,7 @@ export class StorageManager {
 
     if (!keepShared) {
       // Clear scopes, delivery mode and CSRF token to ensure clean state for next session
-      this.storage.removeItem(this.scopes);
+      this.removePrefixed(this.scopes, SCOPES_KEY);
       this.clearDeliveryMode();
       this.removeCsrfToken();
     }
@@ -241,7 +271,7 @@ export class StorageManager {
   }
 
   getDeviceId(): string | undefined {
-    return this.storage.getItem(this.deviceId) ?? undefined;
+    return this.readPrefixed(this.deviceId, DEVICE_ID_KEY);
   }
 
   setDeviceId(deviceId: string): void {
@@ -249,7 +279,7 @@ export class StorageManager {
   }
 
   deleteDeviceId(): void {
-    this.storage.removeItem(this.deviceId);
+    this.removePrefixed(this.deviceId, DEVICE_ID_KEY);
   }
 
   setInvitationToken(token: string): void {
@@ -257,11 +287,11 @@ export class StorageManager {
   }
 
   getInvitationToken(): string | undefined {
-    return this.storage.getItem(this.invitationToken) ?? undefined;
+    return this.readPrefixed(this.invitationToken, INVITATION_TOKEN_KEY);
   }
 
   deleteInvitationToken(): void {
-    this.storage.removeItem(this.invitationToken);
+    this.removePrefixed(this.invitationToken, INVITATION_TOKEN_KEY);
   }
 
   setPreviousRedirectUrl(url: string): void {
@@ -269,11 +299,11 @@ export class StorageManager {
   }
 
   getPreviousRedirectUrl(): string | undefined {
-    return this.storage.getItem(this.previousRedirectUrl) ?? undefined;
+    return this.readPrefixed(this.previousRedirectUrl, PREVIOUS_REDIRECT_URL_KEY);
   }
 
   deletePreviousRedirectUrl(): void {
-    this.storage.removeItem(this.previousRedirectUrl);
+    this.removePrefixed(this.previousRedirectUrl, PREVIOUS_REDIRECT_URL_KEY);
   }
 
   // Delivery mode storage methods

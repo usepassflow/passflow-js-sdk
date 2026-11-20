@@ -249,7 +249,9 @@ describe('SDK mode: start-time checks', () => {
     const h = modeHarness(SDK_APP);
     const c = h.client();
     vi.stubGlobal('isSecureContext', false);
-    vi.stubGlobal('crypto', {});
+    // An insecure context keeps getRandomValues but has no subtle or randomUUID.
+    const { getRandomValues } = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: getRandomValues.bind(globalThis.crypto) });
     await expectRefused(h, c, c.sdk.authRedirect(), 'SECURE_CONTEXT_REQUIRED');
     expect(sessionStorage.getItem(OIDC_SLOT)).toBeNull();
   });

@@ -6,7 +6,7 @@ export class FakeStorage {
   }
 
   getItem(key: string): string | null {
-    return this.data.get(key) || null;
+    return this.data.get(key) ?? null;
   }
 
   removeItem(key: string): void {

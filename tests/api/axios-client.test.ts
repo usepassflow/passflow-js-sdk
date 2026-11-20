@@ -79,10 +79,10 @@ describe('AxiosClient Device Headers', () => {
         Accept: 'application/json',
         'Content-Type': 'application/json',
         [APP_ID_HEADER_KEY]: 'test-app-id',
-        [DEVICE_ID_HEADER_KEY]: 'test-device-id-123',
         [DEVICE_TYPE_HEADER_KEY]: 'web',
       }),
     });
+    expect(mockAxiosCreate.mock.calls[0][0]?.headers).not.toHaveProperty(DEVICE_ID_HEADER_KEY);
   });
 
   test('should include device headers even without appId', async () => {
@@ -102,10 +102,10 @@ describe('AxiosClient Device Headers', () => {
       headers: expect.objectContaining({
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        [DEVICE_ID_HEADER_KEY]: 'test-device-id-123',
         [DEVICE_TYPE_HEADER_KEY]: 'web',
       }),
     });
+    expect(mockAxiosCreate.mock.calls[0][0]?.headers).not.toHaveProperty(DEVICE_ID_HEADER_KEY);
 
     // Verify that appId header is not included when no appId is provided
     const callArgs = mockAxiosCreate.mock.calls[0][0];

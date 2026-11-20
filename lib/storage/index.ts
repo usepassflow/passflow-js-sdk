@@ -25,10 +25,12 @@ export interface StorageManagerParams {
   appId?: string;
 }
 
+const LEGACY_DEVICE_ID_KEY = 'passflowDeviceId';
+
 export class StorageManager {
   private keyStoragePrefix = '';
   readonly scopes = `${this.keyStoragePrefix}tokens_scopes`;
-  readonly deviceId = `${this.keyStoragePrefix}passflowDeviceId`;
+  readonly deviceId: string;
   readonly invitationToken = `${this.keyStoragePrefix}passflowInvitationToken`;
   readonly previousRedirectUrl = `${this.keyStoragePrefix}passflowPreviousRedirectUrl`;
 
@@ -44,6 +46,7 @@ export class StorageManager {
   constructor({ storage, prefix, appId }: StorageManagerParams = {}) {
     this.storage = storage ?? localStorage;
     this.keyStoragePrefix = prefix ? `${prefix}_` : '';
+    this.deviceId = `${this.keyStoragePrefix}passflowDeviceId`;
     this.appId = appId || undefined;
   }
 
@@ -241,7 +244,13 @@ export class StorageManager {
   }
 
   getDeviceId(): string | undefined {
-    return this.storage.getItem(this.deviceId) ?? undefined;
+    const deviceId = this.storage.getItem(this.deviceId);
+    if (deviceId || this.deviceId === LEGACY_DEVICE_ID_KEY) return deviceId ?? undefined;
+    // Earlier versions stored the device id without the prefix: keep using that id.
+    const legacy = this.storage.getItem(LEGACY_DEVICE_ID_KEY);
+    if (!legacy) return undefined;
+    this.storage.setItem(this.deviceId, legacy);
+    return legacy;
   }
 
   setDeviceId(deviceId: string): void {
@@ -250,6 +259,7 @@ export class StorageManager {
 
   deleteDeviceId(): void {
     this.storage.removeItem(this.deviceId);
+    if (this.deviceId !== LEGACY_DEVICE_ID_KEY) this.storage.removeItem(LEGACY_DEVICE_ID_KEY);
   }
 
   setInvitationToken(token: string): void {

@@ -6,22 +6,23 @@ on:
       - 'v*'
 
 jobs:
+  # Jobs that hold write credentials run on GitHub-hosted runners.
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       id-token: write
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
         # No `version:`: the action reads `packageManager` from package.json, so CI
         # and local installs run the same pnpm.
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Use Node.js 24.x
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.x
           cache: 'pnpm'
@@ -68,7 +69,8 @@ jobs:
   # `release: published`, so nothing may be keyed on that event.
   release-page:
     needs: publish
-    runs-on: ubuntu-latest
+    # Jobs that hold write credentials run on GitHub-hosted runners.
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: write
 

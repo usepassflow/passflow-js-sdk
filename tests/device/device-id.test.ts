@@ -129,12 +129,13 @@ describe('device id', () => {
       expect(storage.getItem(LEGACY_KEY)).toBe('id-1');
     });
 
-    test('a legacy unprefixed id is adopted and copied to the prefixed key', () => {
+    test('a legacy unprefixed id is adopted and moved to the prefixed key', () => {
       storage.setItem(LEGACY_KEY, 'legacy-id');
       const storageManager = new StorageManager({ storage, prefix: 'myapp' });
 
       expect(storageManager.getDeviceId()).toBe('legacy-id');
       expect(storage.getItem(PREFIXED_KEY)).toBe('legacy-id');
+      expect(storage.getItem(LEGACY_KEY)).toBeNull();
     });
 
     test('deleteDeviceId removes both the prefixed and the legacy key', () => {

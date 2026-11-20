@@ -155,7 +155,7 @@ describe('StorageManager.tokenKeys', () => {
       'app_id_token',
       'app_access',
       'app_refresh',
-      'tokens_scopes',
+      'app_tokens_scopes',
       'passflow_id_token',
       'passflow_csrf_token',
       'passflow_delivery_mode',

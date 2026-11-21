@@ -52,7 +52,7 @@ describe.skipIf(!url)('user sessions against a live server', () => {
   test('list marks current, revoke-others ends the other device, revoking current signs out', async () => {
     const appId = await createPasswordApp();
     const email = `sessions-${Date.now()}@example.com`;
-    const password = 'Str0ng!Passw0rd#';
+    const password = `Aa1!${crypto.randomUUID()}`;
 
     const a = device(appId, 'device-a');
     const b = device(appId, 'device-b');

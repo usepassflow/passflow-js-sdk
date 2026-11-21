@@ -7,6 +7,12 @@ export const APP_ID_HEADER_KEY = 'X-Passflow-Clientid';
 export const AUTHORIZATION_HEADER_KEY = 'Authorization';
 export const DEVICE_ID_HEADER_KEY = 'X-Passflow-DeviceId';
 export const DEVICE_TYPE_HEADER_KEY = 'X-Passflow-DeviceType';
+/** The anti-bot value of a covered sign-in request on a `human_only` app. */
+export const ANTI_BOT_HEADER_KEY = 'X-Passflow-Anti-Bot';
+/** Set to `1` on requests an agent tool sends (`PassflowAuthOptions.agentTool`). */
+export const AGENT_TOOL_HEADER_KEY = 'X-Passflow-Agent-Tool';
+/** The `action` a token provider receives; a reCAPTCHA score key must be executed with it. */
+export const ANTI_BOT_ACTION = 'passflow_auth';
 
 /**
  * SDK version from package.json.

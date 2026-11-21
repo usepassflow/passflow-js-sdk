@@ -201,6 +201,49 @@ export class WebAdapter implements PlatformAdapter {
       });
     }
 
+    return this.watchPopup(popupWindow, expectedReturnOrigin);
+  }
+
+  /**
+   * Opens a blank popup at once, inside the user's click, and sends it to `url` once that
+   * resolves. A blocked popup falls back to a full-page redirect to the URL; a rejected `url`
+   * closes the popup and rejects with the same error. Other modes wait for the URL and behave as
+   * `openAuthUrl`.
+   */
+  async openPendingAuthUrl(url: Promise<string>, options: OpenAuthUrlOptions = {}): Promise<AuthCallbackResult> {
+    if ((options.mode ?? 'popup') !== 'popup') {
+      return this.openAuthUrl(await url, options);
+    }
+
+    const width = options.width ?? POPUP_WIDTH;
+    const height = options.height ?? POPUP_HEIGHT;
+    const expectedReturnOrigin = options.expectedReturnOrigin ?? window.location.origin;
+
+    // Before the first await, so it runs in the click's task.
+    const popupWindow = window.open('about:blank', '_blank', `width=${width},height=${height}`);
+
+    let authUrl: string;
+    try {
+      authUrl = await url;
+    } catch (error) {
+      popupWindow?.close();
+      throw error;
+    }
+
+    if (!popupWindow) {
+      // Popup blocked — fall back to redirect
+      window.location.href = authUrl;
+      return new Promise(() => {
+        /* intentionally never resolves — falling back to redirect */
+      });
+    }
+
+    popupWindow.location.href = authUrl;
+    return this.watchPopup(popupWindow, expectedReturnOrigin);
+  }
+
+  /** Polls the popup until it returns to `expectedReturnOrigin`, closes, or times out. */
+  private watchPopup(popupWindow: Window, expectedReturnOrigin: string): Promise<AuthCallbackResult> {
     return new Promise<AuthCallbackResult>((resolve, reject) => {
       const startTime = Date.now();
 

@@ -236,6 +236,14 @@ export interface PlatformAdapter {
    */
   openAuthUrl(url: string, options?: OpenAuthUrlOptions): Promise<AuthCallbackResult>;
 
+  /**
+   * Optional. Opens the auth window now, while the user's click still allows it, and navigates it
+   * when `url` resolves; closes it and rejects with the same error if `url` rejects. Used for a
+   * federated start that must be POSTed first (an app in `human_only` bot mode). Without it the
+   * SDK waits for the URL and calls `openAuthUrl`.
+   */
+  openPendingAuthUrl?(url: Promise<string>, options?: OpenAuthUrlOptions): Promise<AuthCallbackResult>;
+
   // ------ Passkeys ------
 
   /**

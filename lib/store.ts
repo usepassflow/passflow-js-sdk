@@ -8,7 +8,8 @@
  * @module store
  */
 
-import type { TwoFactorMethod } from './api/model';
+import type { AntiBotOperation } from './anti-bot/types';
+import type { AntiBotProviderName, TwoFactorMethod } from './api/model';
 import { markReported, notifyError } from './error-report';
 import type { EventOrigin, RefreshErrorInfo, RefreshTrigger, SessionExpiredReason } from './refresh/types';
 import { ParsedTokens, Tokens } from './types';
@@ -50,6 +51,10 @@ export enum PassflowEvent {
   RefreshFailing = 'refresh:failing',
   /** The transient-failure episode ended with a successful refresh or adoption. */
   RefreshRecovered = 'refresh:recovered',
+  /** A `human_only` app's covered call started producing its anti-bot value (a proof of work, or the provider's token). */
+  AntiBotSolving = 'anti-bot:solving',
+  /** The anti-bot value is ready; the covered request goes out next. */
+  AntiBotSolved = 'anti-bot:solved',
 }
 
 /**
@@ -84,6 +89,7 @@ export type PassflowOperation =
   | 'upgrade.commit'
   | 'log-out'
   | 'reset'
+  | 'anti-bot.token'
   // settings, passkeys, tenants, invitations
   | 'settings.app'
   | 'settings.all'
@@ -246,6 +252,8 @@ export type PassflowEventPayload = {
     /** `'this-tab'`: own request succeeded; `'other-tab'`: adopted another tab's tokens. */
     origin: EventOrigin;
   };
+  [PassflowEvent.AntiBotSolving]: { operation: AntiBotOperation; provider: AntiBotProviderName };
+  [PassflowEvent.AntiBotSolved]: { operation: AntiBotOperation; provider: AntiBotProviderName };
 };
 
 /**

@@ -3,11 +3,13 @@ import {
   AuthAPI,
   getOSFromDeviceType,
   isEmailVerificationStep,
+  PassflowAuthOptions,
   PassflowAuthorizationResponse,
   PassflowEmailCodePayload,
   PassflowError,
   PassflowFederatedAuthExtendedPayload,
   PassflowFederatedAuthPayload,
+  PassflowFederatedStartBody,
   PassflowPasskeyAuthenticateStartPayload,
   PassflowPasskeyRegisterStartPayload,
   PassflowPasswordlessResponse,
@@ -37,7 +39,7 @@ import {
   tokensInUrlNotAllowed,
 } from '../oidc';
 import { createPkcePair, type PkcePair } from '../pkce';
-import { type CurrentUrlInfo, type PlatformAdapter, PopupClosedError, webAdapter } from '../platform';
+import { type AuthCallbackResult, type CurrentUrlInfo, type PlatformAdapter, PopupClosedError, webAdapter } from '../platform';
 import {
   createRefreshController,
   type RefreshController,
@@ -57,6 +59,9 @@ import { readSessionPin, sessionPinMatches, type UpgradeSessionPin } from '../up
 import { isValidEmail, isValidPhoneNumber, isValidUsername, sanitizeErrorMessage } from '../utils/validation';
 import { getDefaultLogger } from './logger';
 import { TokenCacheService } from './token-cache-service';
+
+/** The trailing options argument of an `AuthAPI` call, left out entirely when there are none. */
+const optionArg = (options?: PassflowAuthOptions): [] | [PassflowAuthOptions] => (options ? [options] : []);
 
 /** The proof key of a PKCE sign-in that is waiting on its second factor. */
 type PendingPkceSignIn = {
@@ -696,7 +701,7 @@ export class AuthService {
     }
   }
 
-  async signIn(payload: PassflowSignInPayload): Promise<PassflowAuthorizationResponse> {
+  async signIn(payload: PassflowSignInPayload, options?: PassflowAuthOptions): Promise<PassflowAuthorizationResponse> {
     // Validate input before API call
     if ('email' in payload && payload.email) {
       if (!isValidEmail(payload.email)) {
@@ -750,7 +755,12 @@ export class AuthService {
 
     try {
       const pkce = await this.startPkce();
-      const answer = await this.authApi.signIn(pkce ? { ...payload, code_challenge: pkce.challenge } : payload, deviceId, os);
+      const answer = await this.authApi.signIn(
+        pkce ? { ...payload, code_challenge: pkce.challenge } : payload,
+        deviceId,
+        os,
+        ...optionArg(options),
+      );
       if (this.handleEmailVerificationStep(answer, 'sign-in', payload.email, pkce, payload.scopes)) {
         return answer;
       }
@@ -782,7 +792,7 @@ export class AuthService {
     }
   }
 
-  async signUp(payload: PassflowSignUpPayload): Promise<PassflowAuthorizationResponse> {
+  async signUp(payload: PassflowSignUpPayload, options?: PassflowAuthOptions): Promise<PassflowAuthorizationResponse> {
     // Validate user input before API call
     if (payload.user.email && !isValidEmail(payload.user.email)) {
       const error = new Error('Invalid email format');
@@ -814,7 +824,10 @@ export class AuthService {
 
     try {
       const pkce = await this.startPkce();
-      const answer = await this.authApi.signUp(pkce ? { ...payload, code_challenge: pkce.challenge } : payload);
+      const answer = await this.authApi.signUp(
+        pkce ? { ...payload, code_challenge: pkce.challenge } : payload,
+        ...optionArg(options),
+      );
       if (this.handleEmailVerificationStep(answer, 'sign-up', payload.user.email, pkce, payload.scopes)) {
         return answer;
       }
@@ -843,7 +856,10 @@ export class AuthService {
     }
   }
 
-  async passwordlessSignIn(payload: PassflowPasswordlessSignInPayload): Promise<PassflowPasswordlessResponse> {
+  async passwordlessSignIn(
+    payload: PassflowPasswordlessSignInPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowPasswordlessResponse> {
     // Validate input before API call
     if (payload.email && !isValidEmail(payload.email)) {
       const error = new Error('Invalid email format');
@@ -882,6 +898,7 @@ export class AuthService {
         { ...payload, scopes, ...(pkce ? { code_challenge: pkce.challenge } : {}) },
         deviceId,
         os,
+        ...optionArg(options),
       );
       // An unknown user is answered with an empty id, and there is nothing to finish.
       if (pkce && response.challenge_id) {
@@ -912,7 +929,10 @@ export class AuthService {
     }
   }
 
-  async passwordlessSignInComplete(payload: PassflowPasswordlessSignInCompletePayload): Promise<PassflowValidationResponse> {
+  async passwordlessSignInComplete(
+    payload: PassflowPasswordlessSignInCompletePayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowValidationResponse> {
     this.subscribeStore.notify(PassflowEvent.SignInStart, {});
     payload.scopes = payload.scopes ?? this.scopes;
     payload.device = this.deviceService.getDeviceId();
@@ -923,7 +943,7 @@ export class AuthService {
     let answered = false;
 
     try {
-      const answer = await this.authApi.passwordlessSignInComplete(payload);
+      const answer = await this.authApi.passwordlessSignInComplete(payload, ...optionArg(options));
       answered = true;
       if (this.handlePendingSecondFactor(answer, record?.email, record && { verifier: record.verifier }, record?.scopes)) {
         this.forgetPendingPasswordless();
@@ -1524,9 +1544,12 @@ export class AuthService {
     return await this.refresh.refresh({ trigger: 'refresh-token', fresh: true });
   }
 
-  async sendPasswordResetEmail(payload: PassflowSendPasswordResetEmailPayload): Promise<PassflowSuccessResponse> {
+  async sendPasswordResetEmail(
+    payload: PassflowSendPasswordResetEmailPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowSuccessResponse> {
     try {
-      return await this.authApi.sendPasswordResetEmail(payload);
+      return await this.authApi.sendPasswordResetEmail(payload, ...optionArg(options));
     } catch (error) {
       const errorPayload: OperationErrorPayload = {
         operation: 'password-reset.send',
@@ -1583,7 +1606,10 @@ export class AuthService {
     }
   }
 
-  async passkeyRegister(payload: PassflowPasskeyRegisterStartPayload): Promise<PassflowAuthorizationResponse> {
+  async passkeyRegister(
+    payload: PassflowPasskeyRegisterStartPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowAuthorizationResponse> {
     if (!this.platform.passkeys) throw new Error('Passkeys are not supported on this platform');
     this.subscribeStore.notify(PassflowEvent.RegisterStart, {});
     const deviceId = this.deviceService.getDeviceId();
@@ -1598,13 +1624,20 @@ export class AuthService {
         deviceId,
         os,
         !this.appId,
+        ...optionArg(options),
       );
       // user handle should be base64 encoded for simplewebauthn lib we are using
       publicKey.user.id = this.platform.btoa(publicKey.user.id);
       const webauthn = await this.platform.passkeys.startRegistration(publicKey);
       if (!webauthn) throw new Error('Passkey registration was not completed');
 
-      const answer = await this.authApi.passkeyRegisterComplete(webauthn, deviceId, challenge_id, !this.appId);
+      const answer = await this.authApi.passkeyRegisterComplete(
+        webauthn,
+        deviceId,
+        challenge_id,
+        !this.appId,
+        ...optionArg(options),
+      );
       if (this.handlePendingSecondFactor(answer, undefined, pkce, payload.scopes)) {
         return answer;
       }
@@ -1630,7 +1663,10 @@ export class AuthService {
     }
   }
 
-  async passkeyAuthenticate(payload: PassflowPasskeyAuthenticateStartPayload): Promise<PassflowAuthorizationResponse> {
+  async passkeyAuthenticate(
+    payload: PassflowPasskeyAuthenticateStartPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowAuthorizationResponse> {
     if (!this.platform.passkeys) throw new Error('Passkeys are not supported on this platform');
     this.subscribeStore.notify(PassflowEvent.SignInStart, {});
     const deviceId = this.deviceService.getDeviceId();
@@ -1644,11 +1680,18 @@ export class AuthService {
         deviceId,
         os,
         !this.appId,
+        ...optionArg(options),
       );
       const webauthn = await this.platform.passkeys.startAuthentication(publicKey);
       if (!webauthn) throw new Error('Passkey authentication was not completed');
 
-      const answer = await this.authApi.passkeyAuthenticateComplete(webauthn, deviceId, challenge_id, !this.appId);
+      const answer = await this.authApi.passkeyAuthenticateComplete(
+        webauthn,
+        deviceId,
+        challenge_id,
+        !this.appId,
+        ...optionArg(options),
+      );
       if (this.handlePendingSecondFactor(answer, undefined, pkce, payload.scopes)) {
         return answer;
       }
@@ -1680,6 +1723,41 @@ export class AuthService {
     }
   }
 
+  /**
+   * Whether a federated start goes out as a POST (`AuthAPI.federatedStart`) rather than as a
+   * navigation to `createFederatedAuthUrl`: on a `human_only` app, whose start must carry the
+   * anti-bot header, and for an agent tool, whose start must carry its own header. A header cannot
+   * ride a navigation. An unknown bot mode keeps the navigation.
+   */
+  private async usesFederatedPost(options?: PassflowAuthOptions): Promise<boolean> {
+    if (options?.agentTool === true) return true;
+    try {
+      return (await this.readAppSettings?.())?.bot_mode === 'human_only';
+    } catch {
+      return false;
+    }
+  }
+
+  /** The body of a POST federated start: the same fields the GET start sends as query parameters. */
+  private federatedStartBody(payload: PassflowFederatedAuthExtendedPayload, scopes: string[]): PassflowFederatedStartBody {
+    return {
+      redirect_url: payload.redirect_url ?? this.platform.getCurrentUrl()?.origin ?? '',
+      scopes,
+      ...(payload.device ? { device: payload.device } : {}),
+      ...(payload.create_tenant ? { create_tenant: payload.create_tenant } : {}),
+      ...(payload.invite_token ? { invite_token: payload.invite_token } : {}),
+      ...(payload.parent_challenge_id ? { parent_challenge_id: payload.parent_challenge_id } : {}),
+      ...(payload.code_challenge ? { code_challenge: payload.code_challenge } : {}),
+      ...(payload.code_challenge_method ? { code_challenge_method: payload.code_challenge_method } : {}),
+      ...(payload.state ? { state: payload.state } : {}),
+    };
+  }
+
+  /**
+   * The GET start URL. A `human_only` app refuses a start by navigation (403
+   * `error.api.anti_bot.required`); `federatedAuthWithPopup` and `federatedAuthWithRedirect` POST
+   * the start there instead.
+   */
   createFederatedAuthUrl(payload: PassflowFederatedAuthExtendedPayload): string {
     const passflowPathWithProvider = `/auth/federated/start/${payload.provider}`;
 
@@ -1706,7 +1784,7 @@ export class AuthService {
     return url.toString();
   }
 
-  async federatedAuthWithPopup(payload: PassflowFederatedAuthPayload): Promise<void> {
+  async federatedAuthWithPopup(payload: PassflowFederatedAuthPayload, options?: PassflowAuthOptions): Promise<void> {
     this.subscribeStore.notify(PassflowEvent.SignInStart, { provider: payload.provider });
     if (!this.appId) throw new Error(FEDERATED_APP_ID_MESSAGE);
     const sscopes = payload.scopes ?? this.scopes;
@@ -1715,22 +1793,49 @@ export class AuthService {
     try {
       // Cleared before the popup opens: a same-origin popup starts with a copy of sessionStorage.
       this.forgetFederatedSlot();
-      const pkce = await this.startPkce();
-      const passflowURL = this.createFederatedAuthUrl({
-        ...payload,
-        scopes: sscopes,
-        device: deviceId,
-        ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
-      });
-      const opened = this.platform.openAuthUrl(passflowURL, {
-        mode: 'popup',
+      const popupOptions = {
+        mode: 'popup' as const,
         expectedReturnOrigin: this.platform.getCurrentUrl()?.origin ?? '',
-      });
-      // Written in the same tick as the open, and not before it. After it, so the popup's own SDK
-      // holds no copy and cannot race this tab for the code. In the same tick, so a blocked popup's
-      // redirect still lands with the slot before the page unloads.
-      if (pkce) {
-        this.rememberFederatedSlot(pkce.verifier, sscopes);
+      };
+      // Everything that awaits (the settings read, the PKCE pair, a POST start with its anti-bot
+      // solve) happens inside this promise, so the window below opens in the click's task.
+      const prepared = (async () => {
+        const pkce = await this.startPkce();
+        const start: PassflowFederatedAuthExtendedPayload = {
+          ...payload,
+          scopes: sscopes,
+          device: deviceId,
+          ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
+        };
+        const url = (await this.usesFederatedPost(options))
+          ? (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url
+          : this.createFederatedAuthUrl(start);
+        return { url, pkce };
+      })();
+      // The slot is written after the window exists, so the popup's own SDK holds no copy and
+      // cannot race this tab for the code, and before the URL is followed, so a blocked popup's
+      // redirect still lands with it.
+      let pkce: PkcePair | undefined;
+      const remember = (pair: PkcePair | undefined) => {
+        pkce = pair;
+        if (pair) {
+          this.rememberFederatedSlot(pair.verifier, sscopes);
+        }
+      };
+      let opened: Promise<AuthCallbackResult>;
+      if (this.platform.openPendingAuthUrl) {
+        opened = this.platform.openPendingAuthUrl(
+          prepared.then((ready) => {
+            remember(ready.pkce);
+            return ready.url;
+          }),
+          popupOptions,
+        );
+      } else {
+        // An adapter with no pending window (native): it has no user-gesture rule to keep.
+        const ready = await prepared;
+        opened = this.platform.openAuthUrl(ready.url, popupOptions);
+        remember(ready.pkce);
       }
       const result = await opened;
       this.forgetFederatedSlot();
@@ -1796,20 +1901,23 @@ export class AuthService {
     }
   }
 
-  federatedAuthWithRedirect(payload: PassflowFederatedAuthPayload): void {
+  federatedAuthWithRedirect(payload: PassflowFederatedAuthPayload, options?: PassflowAuthOptions): void {
     this.subscribeStore.notify(PassflowEvent.SignInStart, { provider: payload.provider });
     if (!this.appId) throw new Error(FEDERATED_APP_ID_MESSAGE);
     const sscopes = payload.scopes ?? this.scopes;
     const deviceId = this.deviceService.getDeviceId();
 
     this.startPkce()
-      .then((pkce) => {
-        const passflowURL = this.createFederatedAuthUrl({
+      .then(async (pkce) => {
+        const start: PassflowFederatedAuthExtendedPayload = {
           ...payload,
           scopes: sscopes,
           device: deviceId,
           ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
-        });
+        };
+        const passflowURL = (await this.usesFederatedPost(options))
+          ? (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url
+          : this.createFederatedAuthUrl(start);
         if (pkce) {
           this.rememberFederatedSlot(pkce.verifier, sscopes);
         } else {

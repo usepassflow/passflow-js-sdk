@@ -1,9 +1,15 @@
-import { getOSFromDeviceType, PassflowSuccessResponse, UserAPI } from '../api';
+import {
+  getOSFromDeviceType,
+  PassflowRevokeOtherSessionsResponse,
+  PassflowSuccessResponse,
+  PassflowUserSession,
+  UserAPI,
+} from '../api';
 import type { PlatformAdapter } from '../platform';
 import { webAdapter } from '../platform';
 
 /**
- * Service for managing user profile and passkeys
+ * Service for managing user profile, passkeys and sessions
  */
 export class UserService {
   constructor(
@@ -68,6 +74,32 @@ export class UserService {
     const webauthn = await this.platform.passkeys.startRegistration(publicKey);
     if (!webauthn) throw new Error('Passkey registration was not completed');
     return await this.userAPI.addUserPasskeyComplete(webauthn, deviceId, challenge_id);
+  }
+
+  /**
+   * List the user's signed-in sessions
+   * @returns Promise with sessions array
+   */
+  async listSessions(): Promise<PassflowUserSession[]> {
+    const response = await this.userAPI.getUserSessions();
+    return response.sessions;
+  }
+
+  /**
+   * End one of the user's sessions
+   * @param sessionId The ID of the session to end
+   * @returns Promise that resolves when the session is ended
+   */
+  revokeSession(sessionId: string): Promise<void> {
+    return this.userAPI.revokeUserSession(sessionId);
+  }
+
+  /**
+   * End every session of the user except the one making the request
+   * @returns Promise with the number of sessions ended
+   */
+  signOutOtherSessions(): Promise<PassflowRevokeOtherSessionsResponse> {
+    return this.userAPI.revokeOtherUserSessions();
   }
 }
 

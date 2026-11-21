@@ -18,12 +18,14 @@ import {
   type PassflowPasswordlessSignInCompletePayload,
   type PassflowPasswordlessSignInPayload,
   type PassflowPasswordPolicySettings,
+  type PassflowRevokeOtherSessionsResponse,
   type PassflowSendPasswordResetEmailPayload,
   type PassflowSettingsAll,
   type PassflowSignInPayload,
   type PassflowSignUpPayload,
   type PassflowSuccessResponse,
   type PassflowTenantResponse,
+  type PassflowUserSession,
   type PassflowValidationResponse,
   type PasswordlessApprovalInfo,
   type PasswordlessWaitResult,
@@ -1867,6 +1869,97 @@ export class Passflow {
     } catch (error) {
       this.handleError(error, 'passkey.add', 'Add user passkey');
     }
+  }
+
+  // User session methods delegated to UserService
+  /**
+   * List the current user's signed-in sessions, one per sign-in on any device or app.
+   * The session making the request has `current: true`.
+   *
+   * @returns Promise with array of the user's sessions
+   * @throws {PassflowError} If request fails
+   *
+   * @example
+   * ```typescript
+   * const sessions = await passflow.listSessions();
+   * sessions.forEach(session => {
+   *   console.log('Session:', session.id, session.device?.name, session.current);
+   * });
+   * ```
+   */
+  async listSessions(): Promise<PassflowUserSession[]> {
+    try {
+      return await this.userService.listSessions();
+    } catch (error) {
+      this.handleError(error, 'session.list', 'List sessions');
+    }
+  }
+
+  /**
+   * End one of the current user's sessions.
+   *
+   * Ending the session this instance is signed in with signs out like `logOut()`: storage is
+   * deleted, one `SignOut` event follows and, when the sign-in was hosted, the browser goes to the
+   * hosted end-session page. Code after `await revokeSession()` may then not run. A failed request
+   * signs nothing out.
+   *
+   * @param sessionId - ID of the session to end, as returned by `listSessions()`
+   * @returns Promise that resolves when the session is ended
+   * @throws {PassflowError} If request fails
+   *
+   * @example
+   * ```typescript
+   * await passflow.revokeSession('session-123');
+   * console.log('Session ended');
+   * ```
+   */
+  async revokeSession(sessionId: string): Promise<void> {
+    const isCurrent = this.currentSessionId() === sessionId;
+    try {
+      await this.userService.revokeSession(sessionId);
+    } catch (error) {
+      this.handleError(error, 'session.revoke', 'Revoke session');
+    }
+    if (isCurrent) await this.logOut();
+  }
+
+  /**
+   * End every session of the current user except the one this instance is signed in with.
+   * Nothing changes locally.
+   *
+   * @returns Promise with the number of sessions ended
+   * @throws {PassflowError} If request fails
+   *
+   * @example
+   * ```typescript
+   * const { revoked } = await passflow.signOutOtherSessions();
+   * console.log('Sessions ended:', revoked);
+   * ```
+   */
+  async signOutOtherSessions(): Promise<PassflowRevokeOtherSessionsResponse> {
+    try {
+      return await this.userService.signOutOtherSessions();
+    } catch (error) {
+      this.handleError(error, 'session.revoke-others', 'Sign out other sessions');
+    }
+  }
+
+  /** The `sid` of the stored access token, else of the stored ID token; undefined when neither is readable. */
+  private currentSessionId(): string | undefined {
+    const tokens = [
+      this.storageManager.getToken(TokenType.access_token),
+      this.storageManager.getToken(TokenType.id_token) ?? this.storageManager.getIdToken(),
+    ];
+    for (const token of tokens) {
+      if (!token) continue;
+      try {
+        const sid = parseToken(token).sid;
+        if (sid) return sid;
+      } catch (_error) {
+        // An unreadable token says nothing about the session.
+      }
+    }
+    return undefined;
   }
 
   // Tenant methods delegated to TenantService

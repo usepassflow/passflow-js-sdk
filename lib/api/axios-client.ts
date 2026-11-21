@@ -1,5 +1,8 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import type { AntiBotHeader } from '../anti-bot/anti-bot';
+import { type AntiBotMark, readAntiBotMark } from '../anti-bot/markers';
 import {
+  ANTI_BOT_HEADER_KEY,
   APP_ID_HEADER_KEY,
   AUTHORIZATION_HEADER_KEY,
   DEVICE_ID_HEADER_KEY,
@@ -20,6 +23,7 @@ import { parseUpgradeChallenge } from '../upgrade/challenge';
 import { hasUpgradeTransactionMarker } from '../upgrade/markers';
 
 import {
+  ANTI_BOT_FAILED_ERROR_ID,
   PASSWORD_CHANGE_REQUIRED_ERROR_ID,
   PassflowConfig,
   PassflowEndpointPaths,
@@ -37,6 +41,7 @@ import {
 export enum HttpStatuses {
   badRequest = 400,
   unauthorized = 401,
+  forbidden = 403,
   tooManyRequests = 429,
   internalServerError = 500,
   success = 200,
@@ -85,6 +90,19 @@ export type AxiosUpgradeHandler = (error: AxiosError, challenge: UpgradeChalleng
  * bearer instead of waiting for the retry.
  */
 export type AxiosRefreshHandler = (request: { trigger: 'pre-request'; allowStale: boolean }) => Promise<Tokens | undefined>;
+
+/**
+ * Produces the `X-Passflow-Anti-Bot` value of a covered request. Installed by `Passflow` on its
+ * auth client. Resolves `undefined` when the app is not `human_only`: the request then goes out
+ * without the header, as it always has.
+ */
+export type AxiosAntiBotHandler = (mark: AntiBotMark) => Promise<AntiBotHeader | undefined>;
+
+/** The id of a Passflow error body, if the answer has one. */
+const responseErrorId = (e: AxiosError): string | undefined => {
+  const error = (e.response?.data as { error?: { id?: unknown } } | undefined)?.error;
+  return typeof error?.id === 'string' ? error.id : undefined;
+};
 
 /**
  * The request got no answer: offline, DNS, or a gateway answer the browser blocked because it had
@@ -164,7 +182,7 @@ export class AxiosClient {
     'Content-Type': 'application/json',
   };
 
-  private readonly nonAccessTokenEndpoints = ['/auth/', '/settings', '/settings/'];
+  private readonly nonAccessTokenEndpoints = ['/auth/', '/settings', '/settings/', '/oidc/device/anti-bot/challenge'];
   /**
    * Endpoints under `/auth/` that DO need credentials.
    *
@@ -181,6 +199,9 @@ export class AxiosClient {
 
   /** Set by `Passflow` (its refresh controller). Absent on a client built standalone. */
   private refreshHandler?: AxiosRefreshHandler;
+
+  /** Set by `Passflow` on its auth client. Absent elsewhere: no request is marked there. */
+  private antiBotHandler?: AxiosAntiBotHandler;
 
   /**
    * Passflow's own API as an interception scope, resolved ONCE here from
@@ -232,6 +253,16 @@ export class AxiosClient {
     this.instance.interceptors.request.use(async (axiosConfig: InternalAxiosRequestConfig) => {
       // Read per request, so constructing a client never reads or creates the device id.
       axiosConfig.headers[DEVICE_ID_HEADER_KEY] = this.deviceService.getDeviceId();
+
+      // Per request, so a resend gets a new value. A throw rejects the request before it is sent.
+      const mark = readAntiBotMark(axiosConfig);
+      if (mark && this.antiBotHandler) {
+        const header = await this.antiBotHandler(mark);
+        if (header) {
+          axiosConfig.headers[ANTI_BOT_HEADER_KEY] = header.value;
+          mark.builtin = header.builtin;
+        }
+      }
 
       // Request to non-access token endpoints, one that brings its own credential, or one of the
       // hosted session's cookie-only calls, where the stored token session must not appear at all
@@ -326,6 +357,21 @@ export class AxiosClient {
           this.tokenDeliveryManager.setSessionInvalid();
         }
 
+        // A spent or expired built-in proof of work (also after a server key change): one resend,
+        // and the request interceptor fetches and solves a new challenge for it. A provider's
+        // token is not asked for again: the same callback most often gives the same answer.
+        const antiBotMark = readAntiBotMark(e.config);
+        if (
+          e.config &&
+          e.response?.status === HttpStatuses.forbidden &&
+          responseErrorId(e) === ANTI_BOT_FAILED_ERROR_ID &&
+          antiBotMark?.builtin &&
+          !antiBotMark.retried
+        ) {
+          antiBotMark.retried = true;
+          return this.instance.request(e.config);
+        }
+
         // An elevation seam, consulted here because a later-registered
         // interceptor would only ever see the `PassflowError` below. The token session's step-up
         // seam does not act on the hosted session's calls.
@@ -392,6 +438,14 @@ export class AxiosClient {
    */
   setRefreshHandler(handler: AxiosRefreshHandler | undefined): void {
     this.refreshHandler = handler;
+  }
+
+  /**
+   * Installs (or clears) the anti-bot handler. Only requests marked with `withAntiBot` consult it;
+   * every other request is unchanged.
+   */
+  setAntiBotHandler(handler: AxiosAntiBotHandler | undefined): void {
+    this.antiBotHandler = handler;
   }
 
   /**

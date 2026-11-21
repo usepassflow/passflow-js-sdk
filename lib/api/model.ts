@@ -91,6 +91,9 @@ export enum PassflowEndpointPaths {
   // Step-up of the hosted sign-in session, authenticated by its cookie alone.
   hostedUpgradeStart = '/auth/session/upgrade/start',
   hostedUpgrade = '/auth/session/upgrade',
+  // Anti-bot proof-of-work challenges: the app's own, and the device verification page's.
+  antiBotChallenge = '/auth/anti-bot/challenge',
+  deviceAntiBotChallenge = '/oidc/device/anti-bot/challenge',
 }
 
 export enum PassflowAdminEndpointPaths {
@@ -190,6 +193,12 @@ export type PassflowConfig = {
    * uses the default.
    */
   refreshStrikes?: number;
+  /**
+   * Same-origin URL of the anti-bot worker script shipped as `@passflow/core/anti-bot-worker.js`,
+   * for example `'/anti-bot-worker.js'`. Used only by apps in `human_only` bot mode with the
+   * built-in check. Without it the proof of work runs on the main thread.
+   */
+  antiBotWorkerUrl?: string;
 };
 
 export type PassflowUpgradeConfig = {
@@ -381,6 +390,19 @@ export class PassflowError extends Error {
 
 /** Id of the 403 a password sign-in answers with when the user must change the password first. */
 export const PASSWORD_CHANGE_REQUIRED_ERROR_ID = 'error.api.password.change.required';
+
+/** The covered request carried no `X-Passflow-Anti-Bot` header on a `human_only` app (403). */
+export const ANTI_BOT_REQUIRED_ERROR_ID = 'error.api.anti_bot.required';
+/** The anti-bot value was wrong, expired or used before (403). The built-in check is resent once. */
+export const ANTI_BOT_FAILED_ERROR_ID = 'error.api.anti_bot.failed';
+/** The server could not check the anti-bot value right now (503, `Retry-After`). */
+export const ANTI_BOT_UNAVAILABLE_ERROR_ID = 'error.api.anti_bot.unavailable';
+/** A `human_only` app uses its own provider and `setAntiBotTokenProvider()` was not called. */
+export const ANTI_BOT_PROVIDER_MISSING_ERROR_ID = 'error.anti_bot.provider_missing';
+/** The token provider rejected or returned an empty string. */
+export const ANTI_BOT_PROVIDER_FAILED_ERROR_ID = 'error.anti_bot.provider_failed';
+/** The built-in proof of work could not be solved: no Web Crypto, a worker error, or no number found. */
+export const ANTI_BOT_SOLVE_FAILED_ERROR_ID = 'error.anti_bot.solve_failed';
 
 /** The sign-in was refused until the user changes the password; no token comes with it. */
 export class PassflowPasswordChangeRequiredError extends PassflowError {
@@ -609,6 +631,66 @@ export type AppSettings = {
   login_app_theme: LoginWebAppTheme;
   login_app_settings?: unknown;
   token_delivery_method?: TokenDeliveryMethod;
+  /** Absent on servers that do not report it, which means `bot_friendly`. */
+  bot_mode?: BotMode;
+  /** Only when `human_only`. Absent on a `human_only` app means the built-in check. */
+  anti_bot?: AntiBotSettings;
+};
+
+/** `human_only`: every sign-in start must carry an anti-bot value in `X-Passflow-Anti-Bot`. */
+export type BotMode = 'bot_friendly' | 'human_only';
+
+/** `builtin` is Passflow's proof of work; the others are the customer's own provider. */
+export type AntiBotProviderName = 'builtin' | 'turnstile' | 'hcaptcha' | 'recaptcha';
+
+export type AntiBotSettings = {
+  provider: AntiBotProviderName;
+  /** The provider's public site key, for a widget. Absent for `builtin`. */
+  site_key?: string;
+};
+
+/**
+ * `POST /auth/anti-bot/challenge` and `POST /oidc/device/anti-bot/challenge`. The answer is the
+ * integer `number` in `[0, max]` with `hex(SHA-256(salt + ":" + number)) === challenge`.
+ */
+export type AntiBotChallenge = {
+  algorithm: 'SHA-256';
+  app: string;
+  exp: number;
+  max: number;
+  salt: string;
+  challenge: string;
+  signature: string;
+};
+
+/** The decoded `X-Passflow-Anti-Bot` value of the built-in check. */
+export type AntiBotSolution = Omit<AntiBotChallenge, 'algorithm'> & { number: number };
+
+/** Options of one sign-in call. */
+export type PassflowAuthOptions = {
+  /**
+   * Sends `X-Passflow-Agent-Tool: 1`. Set only by agent tool actions; the server then refuses a
+   * device parent. A federated start with it is sent as a POST, because a header cannot ride a
+   * navigation.
+   */
+  agentTool?: boolean;
+};
+
+/** `POST /auth/federated/start/{provider}`: the same fields the GET start takes as query parameters. */
+export type PassflowFederatedStartBody = {
+  device?: string;
+  redirect_url: string;
+  scopes: string[];
+  create_tenant?: boolean;
+  invite_token?: string;
+  parent_challenge_id?: string;
+  code_challenge?: string;
+  code_challenge_method?: 'S256';
+  state?: string;
+};
+
+export type PassflowFederatedStartResponse = {
+  auth_url: string;
 };
 
 /**

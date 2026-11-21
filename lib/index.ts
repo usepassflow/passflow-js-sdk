@@ -1,3 +1,13 @@
+// Anti-bot (bot mode `human_only`): the token provider and helper types. The ids, the API shapes
+// and the header names come with `./api` and `./constants`.
+export type {
+  AntiBotAppSettings,
+  AntiBotDeviceContext,
+  AntiBotOperation,
+  AntiBotTokenContext,
+  AntiBotTokenProvider,
+  AntiBotTokenRequest,
+} from './anti-bot/types';
 // Re-export from API
 export * from './api';
 // Re-export CLI Authentication API client

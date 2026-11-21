@@ -37,7 +37,7 @@ const REPO = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURE = path.join(REPO, 'scripts', 'types-consumer');
 const DEFAULT_TSC = path.join(REPO, 'node_modules', 'typescript', 'bin', 'tsc');
 const CONFIGS = ['node16', 'nodenext', 'bundler', 'node16-cjs'];
-const REQUIRED_FILES = ['package/dist/index.d.ts', 'package/dist/index.d.cts'];
+const REQUIRED_FILES = ['package/dist/index.d.ts', 'package/dist/index.d.cts', 'package/dist/anti-bot-worker.js'];
 const FORBIDDEN_PREFIX = 'package/dist/lib/';
 const SHIPPED_DTS = 'package/dist/index.d.ts';
 // `from './x'`, `from "../x"`, `import('./x')`: any of these breaks node16 resolution.

@@ -75,6 +75,12 @@ The SDK is organized around a main `Passflow` class that orchestrates multiple s
 - Wording for new tokens in code, tests and docs: "issue", "issued" or "new token pair" only (a
   release check greps for the alternative).
 
+### Anti-bot
+- `lib/anti-bot/`: on a `human_only` app the auth client's request interceptor adds `X-Passflow-Anti-Bot`
+  to covered sign-in calls (built-in proof of work, solved in `dist/anti-bot-worker.js` or on the main
+  thread, or a token from `setAntiBotTokenProvider`). A bot-friendly or unknown bot mode sends the same
+  requests as before. Contract: `docs/anti-bot.md`.
+
 ### Event System
 - Centralized event notifications via `PassflowStore`
 - Events: signin, signout, register, error, refresh

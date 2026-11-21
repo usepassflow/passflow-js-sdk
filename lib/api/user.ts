@@ -10,8 +10,10 @@ import {
   PassflowEndpointPaths,
   PassflowPasskeyRegisterPayload,
   PassflowPasskeyStart,
+  PassflowRevokeOtherSessionsResponse,
   PassflowSuccessResponse,
   PassflowUserPasskey,
+  PassflowUserSessionList,
 } from './model';
 
 export class UserAPI {
@@ -72,5 +74,19 @@ export class UserAPI {
       device: deviceId,
       passkey_data: passkeyData,
     });
+  }
+
+  getUserSessions(): Promise<PassflowUserSessionList> {
+    return this.axiosClient.get<PassflowUserSessionList>(PassflowEndpointPaths.userSessions);
+  }
+
+  revokeUserSession(sessionId: string): Promise<void> {
+    return this.axiosClient.delete<void>(`${PassflowEndpointPaths.userSessions}/${encodeURIComponent(sessionId)}`);
+  }
+
+  revokeOtherUserSessions(): Promise<PassflowRevokeOtherSessionsResponse> {
+    return this.axiosClient.post<PassflowRevokeOtherSessionsResponse, undefined>(
+      PassflowEndpointPaths.userSessionsRevokeOthers,
+    );
   }
 }

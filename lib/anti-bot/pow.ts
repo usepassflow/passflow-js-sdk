@@ -21,8 +21,19 @@ const toHex = (buffer: ArrayBuffer): string => {
   return hex;
 };
 
-/** Smallest n in [0, max] with hex(SHA-256(salt + ":" + n)) === challenge, or null. */
-export async function findNumber(salt: string, challenge: string, max: number): Promise<number | null> {
+/** Thrown by `findNumber` when it passes its deadline. */
+export class PowTimeoutError extends Error {}
+
+/**
+ * Smallest n in [0, max] with hex(SHA-256(salt + ":" + n)) === challenge, or null. Throws
+ * `PowTimeoutError` once `deadline` (a `Date.now()` value) has passed.
+ */
+export async function findNumber(
+  salt: string,
+  challenge: string,
+  max: number,
+  deadline = Number.POSITIVE_INFINITY,
+): Promise<number | null> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
     throw new Error('Web Crypto unavailable');
@@ -31,6 +42,9 @@ export async function findNumber(salt: string, challenge: string, max: number): 
   const encoder = new TextEncoder();
 
   for (let start = 0; start <= max; start += BATCH_SIZE) {
+    if (Date.now() > deadline) {
+      throw new PowTimeoutError('Solve timed out');
+    }
     const end = Math.min(start + BATCH_SIZE - 1, max);
     const digests: Promise<ArrayBuffer>[] = [];
     for (let n = start; n <= end; n++) {

@@ -6,9 +6,18 @@
  */
 
 import { ANTI_BOT_SOLVE_FAILED_ERROR_ID, type AntiBotChallenge, type AntiBotSolution, PassflowError } from '../api/model';
-import { findNumber, type PowSolveRequest, type PowSolveResponse } from './pow';
+import { findNumber, type PowSolveRequest, type PowSolveResponse, PowTimeoutError } from './pow';
 
 const SOLVE_FAILED_MESSAGE = 'The browser check could not be completed. Try again later.';
+const VERIFICATION_FAILED_MESSAGE = 'Verification failed. Try again.';
+
+/** The largest `max` solved. The server's hardest challenge is far below it; anything above is refused unsolved. */
+export const MAX_CHALLENGE_NUMBER = 5_000_000;
+
+/** A solve still running after this long is stopped. */
+export const SOLVE_TIMEOUT_MS = 60_000;
+
+class SolveTimeoutError extends Error {}
 
 /** A client-side anti-bot failure, shaped like the errors the API answers with. */
 export const antiBotError = (id: string, message: string, location: string, cause?: unknown): PassflowError =>
@@ -24,7 +33,9 @@ export const antiBotError = (id: string, message: string, location: string, caus
 const solveInWorker = (workerUrl: string, request: PowSolveRequest): Promise<number | null> =>
   new Promise((resolve, reject) => {
     const worker = new Worker(workerUrl);
+    const timer = setTimeout(() => finish(() => reject(new SolveTimeoutError())), SOLVE_TIMEOUT_MS);
     const finish = (settle: () => void) => {
+      clearTimeout(timer);
       worker.terminate();
       settle();
     };
@@ -50,15 +61,22 @@ export async function solveChallenge(challenge: AntiBotChallenge, workerUrl?: st
   if (challenge.algorithm !== 'SHA-256') {
     throw antiBotError(ANTI_BOT_SOLVE_FAILED_ERROR_ID, SOLVE_FAILED_MESSAGE, location);
   }
+  if (!Number.isSafeInteger(challenge.max) || challenge.max < 0 || challenge.max > MAX_CHALLENGE_NUMBER) {
+    throw antiBotError(ANTI_BOT_SOLVE_FAILED_ERROR_ID, VERIFICATION_FAILED_MESSAGE, location);
+  }
   const request: PowSolveRequest = { salt: challenge.salt, challenge: challenge.challenge, max: challenge.max };
   let found: number | null;
   try {
     found =
       workerUrl && typeof Worker !== 'undefined'
         ? await solveInWorker(workerUrl, request)
-        : await findNumber(request.salt, request.challenge, request.max);
+        : await findNumber(request.salt, request.challenge, request.max, Date.now() + SOLVE_TIMEOUT_MS);
   } catch (error) {
-    throw antiBotError(ANTI_BOT_SOLVE_FAILED_ERROR_ID, SOLVE_FAILED_MESSAGE, location, error);
+    const message =
+      error instanceof SolveTimeoutError || error instanceof PowTimeoutError
+        ? VERIFICATION_FAILED_MESSAGE
+        : SOLVE_FAILED_MESSAGE;
+    throw antiBotError(ANTI_BOT_SOLVE_FAILED_ERROR_ID, message, location, error);
   }
   if (found === null) {
     throw antiBotError(ANTI_BOT_SOLVE_FAILED_ERROR_ID, SOLVE_FAILED_MESSAGE, location);

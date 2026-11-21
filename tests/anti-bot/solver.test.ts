@@ -27,6 +27,20 @@ const ROOT = resolve(__dirname, '../..');
 const WORKER_FILE = resolve(ROOT, 'dist/anti-bot-worker.js');
 const WORKER_URL = '/assets/anti-bot-worker.js';
 
+const VERIFICATION_FAILED = 'Verification failed. Try again.';
+/** No number hashes to this, so a solve runs until it is stopped. */
+const UNSOLVABLE = { ...VECTOR_A, challenge: 'f'.repeat(64), max: 5_000_000 };
+
+/** Every later `Date.now()` reads 61 s past the previous one, so any deadline passes on its next check. */
+function clockJumps() {
+  const real = Date.now.bind(Date);
+  let offset = 0;
+  return vi.spyOn(Date, 'now').mockImplementation(() => {
+    offset += 61_000;
+    return real() + offset;
+  });
+}
+
 const signIn = (h: ReturnType<typeof harness>) => h.sdk.signIn({ email: EMAIL, password: 'Password123!' } as never);
 
 describe('main-thread solve (no worker URL)', () => {
@@ -78,10 +92,36 @@ describe('main-thread solve (no worker URL)', () => {
     expect((error as { id?: string }).id).toBe(ANTI_BOT_SOLVE_FAILED_ERROR_ID);
     expect(h.wire('/auth/login')).toHaveLength(0);
   });
+
+  test('a challenge with max above 5,000,000 is refused without solving, and not retried', async () => {
+    const h = harness(HUMAN_BUILTIN);
+    h.reply(CHALLENGE_PATH, { ...VECTOR_A, max: 5_000_001 });
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    const error = await outcome(signIn(h));
+    expect(error).toMatchObject({ id: ANTI_BOT_SOLVE_FAILED_ERROR_ID, message: VERIFICATION_FAILED });
+    expect(digest).not.toHaveBeenCalled();
+    expect(h.wire(CHALLENGE_PATH)).toHaveLength(1);
+    expect(h.wire('/auth/login')).toHaveLength(0);
+    digest.mockRestore();
+  });
+
+  test('a main-thread solve still running after 60 s stops with "verification failed", not retried', async () => {
+    const h = harness(HUMAN_BUILTIN);
+    let clock: ReturnType<typeof clockJumps> | undefined;
+    h.reply(CHALLENGE_PATH, () => {
+      clock = clockJumps();
+      return UNSOLVABLE;
+    });
+    const error = await outcome(signIn(h));
+    clock?.mockRestore();
+    expect(error).toMatchObject({ id: ANTI_BOT_SOLVE_FAILED_ERROR_ID, message: VERIFICATION_FAILED });
+    expect(h.wire(CHALLENGE_PATH)).toHaveLength(1);
+    expect(h.wire('/auth/login')).toHaveLength(0);
+  });
 });
 
 /** A Worker stand-in that evaluates the real built file as a classic script. */
-function installWorker(source: string, mode: 'run' | 'error' = 'run') {
+function installWorker(source: string, mode: 'run' | 'error' | 'silent' = 'run') {
   const created: string[] = [];
   let terminated = 0;
   class FakeWorker {
@@ -106,7 +146,9 @@ function installWorker(source: string, mode: 'run' | 'error' = 'run') {
       };
       this.scope.self = this.scope;
       this.scope.globalThis = this.scope;
-      if (mode === 'run') {
+      if (mode === 'silent') {
+        // Loads, takes the message, never answers.
+      } else if (mode === 'run') {
         vm.runInNewContext(source, this.scope, { filename: 'anti-bot-worker.js' });
       } else {
         setTimeout(() => this.dispatch('error', { message: 'failed to load', type: 'error' }), 0);
@@ -173,6 +215,26 @@ describe('the built worker file', () => {
     const h = harness(HUMAN_BUILTIN, { config: { antiBotWorkerUrl: WORKER_URL } });
     const error = await outcome(signIn(h));
     expect((error as { id?: string }).id).toBe(ANTI_BOT_SOLVE_FAILED_ERROR_ID);
+    expect(h.wire('/auth/login')).toHaveLength(0);
+  });
+
+  test('a worker solve still running after 60 s is terminated with "verification failed", not retried', async () => {
+    const worker = installWorker(source, 'silent');
+    const realSetTimeout = globalThis.setTimeout;
+    const delays: number[] = [];
+    const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, delay?: number) => {
+      delays.push(delay ?? 0);
+      // The 60 s solve limit fires at once; every other timer keeps its delay.
+      return realSetTimeout(fn, delay === 60_000 ? 0 : delay);
+    }) as typeof setTimeout);
+    const h = harness(HUMAN_BUILTIN, { config: { antiBotWorkerUrl: WORKER_URL } });
+    h.reply(CHALLENGE_PATH, UNSOLVABLE);
+    const error = await outcome(signIn(h));
+    timers.mockRestore();
+    expect(delays).toContain(60_000);
+    expect(error).toMatchObject({ id: ANTI_BOT_SOLVE_FAILED_ERROR_ID, message: VERIFICATION_FAILED });
+    expect(worker.terminated()).toBe(1);
+    expect(h.wire(CHALLENGE_PATH)).toHaveLength(1);
     expect(h.wire('/auth/login')).toHaveLength(0);
   });
 

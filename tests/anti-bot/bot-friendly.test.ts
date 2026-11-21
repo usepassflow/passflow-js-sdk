@@ -103,22 +103,22 @@ describe('federated on bot_friendly', () => {
     expectUntouched(h);
   });
 
-  test('REQ-6 popup uses openAuthUrl, never openPendingAuthUrl, and sends no POST', async () => {
-    let pending = 0;
+  test('REQ-6 popup opens pending and follows the GET start URL; no POST', async () => {
+    const urls: string[] = [];
     const h = harness(BOT_FRIENDLY, {
       platform: {
-        openPendingAuthUrl: async () => {
-          pending += 1;
+        openPendingAuthUrl: async (url: Promise<string>) => {
+          urls.push(await url);
           return { callbackSearch: '', callbackHash: '' };
         },
       },
     });
-    // Passflow.federatedAuthWithPopup returns void: wait for the window to open.
+    // Passflow.federatedAuthWithPopup returns void: wait for the window to get its URL.
     h.sdk.federatedAuthWithPopup(federatedPayload() as never);
-    await until(() => h.opened.length > 0 || pending > 0);
-    expect(h.opened).toHaveLength(1);
-    expect(new URL(h.opened[0]).pathname).toContain('/auth/federated/start/google');
-    expect(pending).toBe(0);
+    await until(() => urls.length > 0);
+    expect(h.opened).toHaveLength(0);
+    expect(new URL(urls[0]).pathname).toContain('/auth/federated/start/google');
+    expect(new URL(urls[0]).searchParams.toString()).not.toMatch(/anti/i);
     expect(h.wire('/auth/federated/start/google')).toHaveLength(0);
     expectUntouched(h);
   });

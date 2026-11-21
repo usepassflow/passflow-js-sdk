@@ -48,6 +48,10 @@ The file is a classic script, never a `blob:` URL, so a `script-src 'self'` poli
 Without `antiBotWorkerUrl`, or where `Worker` does not exist, the search runs on the main thread.
 A worker that fails to load is an error, not a reason to fall back.
 
+A challenge whose `max` is above 5,000,000 is refused without solving, and a solve still running
+after 60 seconds is stopped (the worker is terminated). Both reject with `error.anti_bot.solve_failed`
+and the message "Verification failed. Try again."; neither is resent.
+
 When the server answers 403 `error.api.anti_bot.failed` (the challenge expired, or the server
 changed its key), the SDK asks for a new challenge, solves it, and sends the request once more.
 A second `failed` is surfaced.
@@ -84,13 +88,14 @@ and no `AntiBotSolved`, then the covered call's usual `Error` event with its own
 | `error.api.anti_bot.unavailable` (503) | The server cannot check now. Not resent; try again later. |
 | `error.anti_bot.provider_missing` | Own provider, no `setAntiBotTokenProvider()`. |
 | `error.anti_bot.provider_failed` | The provider function rejected or resolved `''`. |
-| `error.anti_bot.solve_failed` | No Web Crypto (plain http), a worker error, or no answer found. |
+| `error.anti_bot.solve_failed` | No Web Crypto (plain http), a worker error, no answer found, `max` above 5,000,000, or a solve past 60 s. |
 
 ## Federated sign-in
 
 A header cannot ride a navigation, so on a `human_only` app the federated start is a POST. The SDK
-then goes to the `auth_url` it answers with. The popup opens blank at once, inside the click, and
-follows the URL when the start answers. A platform adapter can do the same with
+then goes to the `auth_url` it answers with. On every app the popup opens blank at once, inside the
+click and before any await (settings read, PKCE, the POST and its solve), and follows the URL once
+it is known. A platform adapter can do the same with
 `openPendingAuthUrl`; one without it gets `openAuthUrl(auth_url)` once the URL is known.
 
 `createFederatedAuthUrl` still builds the GET start, which a `human_only` app refuses.

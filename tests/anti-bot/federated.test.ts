@@ -71,4 +71,25 @@ describe('federated start on human_only', () => {
     expect(header(h.wire(START)[0], ANTI_BOT)).toBeTruthy();
     expect(h.opened).toEqual([]);
   });
+
+  test.each([
+    ['human_only', HUMAN_BUILTIN],
+    ['bot_friendly', { bot_mode: 'bot_friendly' }],
+  ] as const)('REQ-1 %s popup: the window opens synchronously, before any request or await', (_mode, settings) => {
+    let opened = 0;
+    let requestsAtOpen = -1;
+    const h = harness(settings as never, {
+      platform: {
+        openPendingAuthUrl: (url: Promise<string>) => {
+          opened += 1;
+          requestsAtOpen = h.requests.length;
+          return url.then(() => new Promise<never>(() => {}));
+        },
+      },
+    });
+    h.sdk.federatedAuthWithPopup(federatedPayload() as never);
+    // No await between the call and these checks: the open happened in the same task.
+    expect(opened).toBe(1);
+    expect(requestsAtOpen).toBe(0);
+  });
 });

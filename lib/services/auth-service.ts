@@ -1793,35 +1793,49 @@ export class AuthService {
     try {
       // Cleared before the popup opens: a same-origin popup starts with a copy of sessionStorage.
       this.forgetFederatedSlot();
-      const pkce = await this.startPkce();
-      const start: PassflowFederatedAuthExtendedPayload = {
-        ...payload,
-        scopes: sscopes,
-        device: deviceId,
-        ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
-      };
       const popupOptions = {
         mode: 'popup' as const,
         expectedReturnOrigin: this.platform.getCurrentUrl()?.origin ?? '',
       };
+      // Everything that awaits (the settings read, the PKCE pair, a POST start with its anti-bot
+      // solve) happens inside this promise, so the window below opens in the click's task.
+      const prepared = (async () => {
+        const pkce = await this.startPkce();
+        const start: PassflowFederatedAuthExtendedPayload = {
+          ...payload,
+          scopes: sscopes,
+          device: deviceId,
+          ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
+        };
+        const url = (await this.usesFederatedPost(options))
+          ? (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url
+          : this.createFederatedAuthUrl(start);
+        return { url, pkce };
+      })();
+      // The slot is written after the window exists, so the popup's own SDK holds no copy and
+      // cannot race this tab for the code, and before the URL is followed, so a blocked popup's
+      // redirect still lands with it.
+      let pkce: PkcePair | undefined;
+      const remember = (pair: PkcePair | undefined) => {
+        pkce = pair;
+        if (pair) {
+          this.rememberFederatedSlot(pair.verifier, sscopes);
+        }
+      };
       let opened: Promise<AuthCallbackResult>;
-      if (await this.usesFederatedPost(options)) {
-        // The challenge and solve can outlast the click's user activation, so the window opens
-        // first and follows the URL once the start answers.
-        const authUrl = this.authApi
-          .federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)
-          .then((answer) => answer.auth_url);
-        opened = this.platform.openPendingAuthUrl
-          ? this.platform.openPendingAuthUrl(authUrl, popupOptions)
-          : authUrl.then((url) => this.platform.openAuthUrl(url, popupOptions));
+      if (this.platform.openPendingAuthUrl) {
+        opened = this.platform.openPendingAuthUrl(
+          prepared.then((ready) => {
+            remember(ready.pkce);
+            return ready.url;
+          }),
+          popupOptions,
+        );
       } else {
-        opened = this.platform.openAuthUrl(this.createFederatedAuthUrl(start), popupOptions);
-      }
-      // Written in the same tick as the open, and not before it. After it, so the popup's own SDK
-      // holds no copy and cannot race this tab for the code. In the same tick, so a blocked popup's
-      // redirect still lands with the slot before the page unloads.
-      if (pkce) {
-        this.rememberFederatedSlot(pkce.verifier, sscopes);
+        // An adapter with no pending window (native): it has no user-gesture rule to keep.
+        const ready = await prepared;
+        opened = this.platform.openAuthUrl(ready.url, popupOptions);
+        remember(ready.pkce);
       }
       const result = await opened;
       this.forgetFederatedSlot();

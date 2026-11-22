@@ -318,19 +318,16 @@ const kindFromErrorId = (errorId: string | undefined, endpoint: UpgradeEndpoint)
     // the factor is not set up — and it is ROUND-DEPENDENT.
     //
     // On the PREPARE round it is the server refusing one factor while the
-    // flight is still choosing, which §13.4 makes flight-local pruning plus a
-    // re-prompt: retryable with another factor, never an expiry.
+    // flight is still choosing: the controller drops that factor for this
+    // flight and re-prompts with the rest. Retryable, never an expiry.
     //
-    // On the COMMIT round C26c governs, and it is explicit: a commit 401
-    // carrying any other id, `error.2fa.not_enabled` included, terminates the
-    // elevation as `session changed mid-flight` while `setSessionInvalid()` is
-    // NOT called and `SessionState` is untouched. Mapping it to
-    // `not_registered` there made it retryable, so the controller pruned TOTP
-    // and re-prompted against a commit that can only refuse again — the user
-    // sat in front of a modal that never resolved. Terminal settlement with the
-    // session left alone is the lock-out-free outcome the ticket exists for;
-    // invalidation stays off because this id is not on
-    // `SESSION_INVALIDATING_COMMIT_ERROR_IDS`.
+    // On the COMMIT round a 401 carrying it ends the elevation as `session
+    // changed mid-flight`. A commit that refuses this factor refuses it again
+    // on every retry, so mapping it to `not_registered` here would prune the
+    // factor and re-prompt forever, leaving the user in a modal that never
+    // resolves. Ending the elevation settles it without locking the user out:
+    // `setSessionInvalid()` is not called and `SessionState` is untouched,
+    // because this id is not on `SESSION_INVALIDATING_COMMIT_ERROR_IDS`.
     case UpgradeErrorIds.twoFactorNotEnabled:
       return endpoint === 'refresh' ? 'session_changed' : 'not_registered';
     case UpgradeErrorIds.prepareNotRequired:

@@ -113,8 +113,8 @@ export class WebAdapter implements PlatformAdapter {
    *   document.addEventListener('visibilitychange', handler) where document.hidden
    *   (token-cache-service.ts:134-145, complementary to onForeground)
    *
-   * NOTE: Not currently called by the SDK. Included in the interface for
-   * React Native adapter compatibility (future use).
+   * NOTE: The SDK does not call it. It is part of the `PlatformAdapter` interface
+   * so an adapter for another platform, such as React Native, can offer it.
    */
   onBackground(callback: () => void): () => void {
     if (typeof document === 'undefined')

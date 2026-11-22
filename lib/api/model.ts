@@ -52,6 +52,8 @@ export enum PassflowEndpointPaths {
   userPasskey = '/user/passkey',
   addUserPasskey = `${PassflowEndpointPaths.userPasskey}/add/start`,
   completeAddUserPasskey = `${PassflowEndpointPaths.userPasskey}/add/complete`,
+  userSessions = '/user/sessions',
+  userSessionsRevokeOthers = `${PassflowEndpointPaths.userSessions}/revoke-others`,
   joinInvitation = '/user/tenant/join',
   tenantPath = '/user/tenant',
   invitationsPath = '/user/tenant/:tenantID/invitations',
@@ -923,6 +925,45 @@ export type PassflowUserPasskey = {
   archived_at: Date | string;
   count?: number;
   enrolled_with_app_id?: string;
+};
+
+/** The device a session was signed in from, as the server recorded it. */
+export type PassflowSessionDevice = {
+  name?: string;
+  /**
+   * App type the session was signed in with. Known values: `web`, `spa`, `bff`, `android`, `ios`,
+   * `desktop`, `cli`, `m2m`, `other`, `undefined`. The server may add more.
+   */
+  type?: string;
+  user_agent?: string;
+  ip?: string;
+  location?: string;
+  /** RFC 3339 time of the last request made with this session. */
+  last_seen?: string;
+};
+
+/** One signed-in session of the current user. */
+export type PassflowUserSession = {
+  id: string;
+  app_id: string;
+  /** RFC 3339 */
+  created_at: string;
+  /** RFC 3339 time of the sign-in this session started with. */
+  auth_time: string;
+  /** RFC 3339; absent when the session has no end. */
+  expires_at?: string;
+  /** `true` for the session that made the request. */
+  current: boolean;
+  device?: PassflowSessionDevice;
+};
+
+export type PassflowUserSessionList = {
+  sessions: PassflowUserSession[];
+};
+
+export type PassflowRevokeOtherSessionsResponse = {
+  /** How many sessions were ended. */
+  revoked: number;
 };
 
 export type PassflowSendPasswordResetEmailPayload = {

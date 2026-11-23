@@ -1,4 +1,6 @@
 import type { AxiosInstance } from 'axios';
+import { type AntiBot, createAntiBot } from './anti-bot/anti-bot';
+import type { AntiBotTokenProvider, AntiBotTokenRequest } from './anti-bot/types';
 import {
   AppAPI,
   type AppSettings,
@@ -6,6 +8,7 @@ import {
   InvitationAPI,
   type InvitationsPaginatedList,
   type InviteLinkResponse,
+  type PassflowAuthOptions,
   type PassflowAuthorizationResponse,
   type PassflowConfig,
   type PassflowEmailCodePayload,
@@ -130,6 +133,7 @@ export class Passflow {
   private invitationService: InvitationService;
   private tokenCacheService: TokenCacheService;
   private twoFactorService: TwoFactorService;
+  private antiBot: AntiBot;
 
   // Public services
   public tenant: TenantService;
@@ -249,6 +253,21 @@ export class Passflow {
       },
       () => this.readAppSettings(),
     );
+
+    // The anti-bot value of covered sign-in calls. Only the auth client sends them.
+    this.antiBot = createAntiBot({
+      readSettings: () => this.readAppSettings(),
+      fetchChallenge: ({ identifier, device }) =>
+        device
+          ? this.authApi.deviceAntiBotChallenge(
+              { user_code: device.userCode, ...(identifier ? { identifier } : {}) },
+              device.csrfToken,
+            )
+          : this.authApi.antiBotChallenge(identifier ? { identifier } : {}),
+      store: this.subscribeStore,
+      ...(config.antiBotWorkerUrl ? { workerUrl: config.antiBotWorkerUrl } : {}),
+    });
+    this.authApi.setAntiBotHandler((mark) => this.antiBot.headerFor(mark));
 
     // getTokensWithRefresh() refreshes through the same controller.
     this.tokenCacheService.attachRefreshController(this.authService.refresh);
@@ -1092,8 +1111,8 @@ export class Passflow {
    * }
    * ```
    */
-  async signIn(payload: PassflowSignInPayload): Promise<PassflowAuthorizationResponse> {
-    const response = await this.authService.signIn(payload);
+  async signIn(payload: PassflowSignInPayload, options?: PassflowAuthOptions): Promise<PassflowAuthorizationResponse> {
+    const response = await this.authService.signIn(payload, options);
 
     return response;
   }
@@ -1125,8 +1144,8 @@ export class Passflow {
    * }
    * ```
    */
-  async signUp(payload: PassflowSignUpPayload): Promise<PassflowAuthorizationResponse> {
-    const response = await this.authService.signUp(payload);
+  async signUp(payload: PassflowSignUpPayload, options?: PassflowAuthOptions): Promise<PassflowAuthorizationResponse> {
+    const response = await this.authService.signUp(payload, options);
 
     return response;
   }
@@ -1150,8 +1169,11 @@ export class Passflow {
    * console.log('Magic link sent:', response.success);
    * ```
    */
-  passwordlessSignIn(payload: PassflowPasswordlessSignInPayload): Promise<PassflowPasswordlessResponse> {
-    return this.authService.passwordlessSignIn(payload);
+  passwordlessSignIn(
+    payload: PassflowPasswordlessSignInPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowPasswordlessResponse> {
+    return this.authService.passwordlessSignIn(payload, options);
   }
 
   /**
@@ -1177,8 +1199,11 @@ export class Passflow {
    * }
    * ```
    */
-  async passwordlessSignInComplete(payload: PassflowPasswordlessSignInCompletePayload): Promise<PassflowValidationResponse> {
-    const response = await this.authService.passwordlessSignInComplete(payload);
+  async passwordlessSignInComplete(
+    payload: PassflowPasswordlessSignInCompletePayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowValidationResponse> {
+    const response = await this.authService.passwordlessSignInComplete(payload, options);
 
     return response;
   }
@@ -1303,6 +1328,40 @@ export class Passflow {
     }
   }
 
+  /**
+   * Sets the token provider for an app in `human_only` bot mode that uses its own anti-bot
+   * provider (Turnstile, hCaptcha, reCAPTCHA). Before each covered sign-in request the SDK calls it
+   * with `{ action: 'passflow_auth', operation }` and sends the token it resolves with in
+   * `X-Passflow-Anti-Bot`. Not called on a `bot_friendly` app, nor with the built-in check.
+   * `undefined` removes it.
+   *
+   * @example
+   * ```typescript
+   * passflow.setAntiBotTokenProvider(() => getTurnstileToken());
+   * ```
+   */
+  setAntiBotTokenProvider(provider: AntiBotTokenProvider | undefined): void {
+    this.antiBot.setTokenProvider(provider);
+  }
+
+  /**
+   * A fresh `X-Passflow-Anti-Bot` value for a request the SDK does not send itself:
+   * `POST /auth/session/exchange`, `/oidc/device/authenticate`, `/oidc/device/passkey/start`.
+   * `undefined` when the app is not `human_only`: send no header then. A value is accepted once.
+   *
+   * The device page has no app id: it passes `settings` from `GET /oidc/device/info` and
+   * `device: { userCode, csrfToken }`, and this instance must have `url` set to the page's origin.
+   *
+   * @throws {PassflowError} When the challenge, the solve or the token provider fails
+   */
+  async antiBotToken(request: AntiBotTokenRequest): Promise<string | undefined> {
+    try {
+      return (await this.antiBot.headerFor(request))?.value;
+    } catch (error) {
+      this.handleError(error, 'anti-bot.token', 'Anti-bot token');
+    }
+  }
+
   private handleError(error: unknown, operation: PassflowOperation, context: string): never {
     const errorPayload: OperationErrorPayload = {
       operation,
@@ -1381,8 +1440,8 @@ export class Passflow {
    * });
    * ```
    */
-  federatedAuthWithPopup(payload: PassflowFederatedAuthPayload): void {
-    this.authService.federatedAuthWithPopup(payload);
+  federatedAuthWithPopup(payload: PassflowFederatedAuthPayload, options?: PassflowAuthOptions): void {
+    this.authService.federatedAuthWithPopup(payload, options);
   }
 
   /**
@@ -1402,8 +1461,8 @@ export class Passflow {
    * });
    * ```
    */
-  federatedAuthWithRedirect(payload: PassflowFederatedAuthPayload): void {
-    this.authService.federatedAuthWithRedirect(payload);
+  federatedAuthWithRedirect(payload: PassflowFederatedAuthPayload, options?: PassflowAuthOptions): void {
+    this.authService.federatedAuthWithRedirect(payload, options);
   }
 
   /**
@@ -1517,8 +1576,11 @@ export class Passflow {
    * }
    * ```
    */
-  sendPasswordResetEmail(payload: PassflowSendPasswordResetEmailPayload): Promise<PassflowSuccessResponse> {
-    return this.authService.sendPasswordResetEmail(payload);
+  sendPasswordResetEmail(
+    payload: PassflowSendPasswordResetEmailPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowSuccessResponse> {
+    return this.authService.sendPasswordResetEmail(payload, options);
   }
 
   /**
@@ -1663,8 +1725,11 @@ export class Passflow {
    * }
    * ```
    */
-  async passkeyRegister(payload: PassflowPasskeyRegisterStartPayload): Promise<PassflowAuthorizationResponse> {
-    const response = await this.authService.passkeyRegister(payload);
+  async passkeyRegister(
+    payload: PassflowPasskeyRegisterStartPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowAuthorizationResponse> {
+    const response = await this.authService.passkeyRegister(payload, options);
 
     return response;
   }
@@ -1689,8 +1754,11 @@ export class Passflow {
    * }
    * ```
    */
-  async passkeyAuthenticate(payload: PassflowPasskeyAuthenticateStartPayload): Promise<PassflowAuthorizationResponse> {
-    const response = await this.authService.passkeyAuthenticate(payload);
+  async passkeyAuthenticate(
+    payload: PassflowPasskeyAuthenticateStartPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowAuthorizationResponse> {
+    const response = await this.authService.passkeyAuthenticate(payload, options);
 
     return response;
   }

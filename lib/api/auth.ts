@@ -1,20 +1,26 @@
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/browser';
 import type { AxiosRequestConfig } from 'axios';
-import { APP_ID_HEADER_KEY, AUTHORIZATION_HEADER_KEY } from '../constants';
+import { withAntiBot } from '../anti-bot/markers';
+import type { AntiBotOperation } from '../anti-bot/types';
+import { AGENT_TOOL_HEADER_KEY, APP_ID_HEADER_KEY, AUTHORIZATION_HEADER_KEY } from '../constants';
 
 import { DeviceService } from '../device';
 import { StorageManager } from '../storage';
 import { markUpgradeTransaction } from '../upgrade/markers';
 
-import { AxiosClient } from './axios-client';
+import { type AxiosAntiBotHandler, AxiosClient } from './axios-client';
 import {
+  type AntiBotChallenge,
   OS,
   PassflowAdminEndpointPaths,
+  PassflowAuthOptions,
   PassflowAuthorizationResponse,
   PassflowConfig,
   PassflowEmailCodePayload,
   PassflowEndpointPaths,
   PassflowError,
+  PassflowFederatedStartBody,
+  PassflowFederatedStartResponse,
   PassflowLogoutResponse,
   PassflowPasskeyAuthenticatePayload,
   PassflowPasskeyAuthenticateStartExtendedPayload,
@@ -58,6 +64,9 @@ const SIGN_IN_REQUEST_CONFIG: AxiosRequestConfig = { withCredentials: true };
 /** One status poll may take this long, so a stalled request cannot hold up the next one. */
 const PASSWORDLESS_STATUS_TIMEOUT_MS = 15000;
 
+/** The device verification page's CSRF header, required by every `/oidc/device/*` POST. */
+const DEVICE_CSRF_HEADER_KEY = 'X-Passflow-CSRF';
+
 const SIGN_IN_FAILED_MESSAGE = 'Sign-in failed. Start again.';
 const TRY_AGAIN_LATER_MESSAGE = 'Something went wrong. Try again later.';
 
@@ -79,6 +88,25 @@ const toPlainError = (error: unknown, path: PassflowEndpointPaths, id: string, m
   });
 };
 
+/**
+ * The config of one sign-in call: `base`, the anti-bot mark when the call is covered, and the
+ * agent-tool header when the caller asked for it. With neither, it is `base` itself, so an
+ * uncovered call and a call without options send exactly what they sent before.
+ */
+const callConfig = (
+  base: AxiosRequestConfig | undefined,
+  operation: AntiBotOperation | undefined,
+  identifier: string | undefined,
+  options?: PassflowAuthOptions,
+): AxiosRequestConfig | undefined => {
+  if (!operation && !options?.agentTool) return base;
+  return {
+    ...base,
+    ...(operation ? withAntiBot(operation, identifier) : {}),
+    ...(options?.agentTool ? { headers: { ...base?.headers, [AGENT_TOOL_HEADER_KEY]: '1' } } : {}),
+  };
+};
+
 export class AuthAPI {
   protected axiosClient: AxiosClient;
 
@@ -88,6 +116,67 @@ export class AuthAPI {
 
   setAppId(appId: string): void {
     this.axiosClient.setAppId(appId);
+  }
+
+  /** Installs (or clears) the handler that produces the anti-bot value of covered calls. */
+  setAntiBotHandler(handler: AxiosAntiBotHandler | undefined): void {
+    this.axiosClient.setAntiBotHandler(handler);
+  }
+
+  /**
+   * A built-in anti-bot challenge for this app. `identifier` is used by the server for difficulty
+   * only. Rejects only with a `PassflowError`.
+   */
+  async antiBotChallenge(payload: { identifier?: string }): Promise<AntiBotChallenge> {
+    try {
+      return await this.axiosClient.post<AntiBotChallenge, { identifier?: string }>(
+        PassflowEndpointPaths.antiBotChallenge,
+        payload,
+      );
+    } catch (error) {
+      throw toPlainError(error, PassflowEndpointPaths.antiBotChallenge, 'error.anti_bot.challenge', TRY_AGAIN_LATER_MESSAGE);
+    }
+  }
+
+  /**
+   * A built-in anti-bot challenge for the device verification page, for the app of `user_code`.
+   * Same-origin only, with the page's CSRF token. Rejects only with a `PassflowError`.
+   */
+  async deviceAntiBotChallenge(
+    payload: { user_code: string; identifier?: string },
+    csrfToken: string,
+  ): Promise<AntiBotChallenge> {
+    try {
+      return await this.axiosClient.post<AntiBotChallenge, { user_code: string; identifier?: string }>(
+        PassflowEndpointPaths.deviceAntiBotChallenge,
+        payload,
+        { headers: { [DEVICE_CSRF_HEADER_KEY]: csrfToken } },
+      );
+    } catch (error) {
+      throw toPlainError(
+        error,
+        PassflowEndpointPaths.deviceAntiBotChallenge,
+        'error.anti_bot.challenge',
+        TRY_AGAIN_LATER_MESSAGE,
+      );
+    }
+  }
+
+  /**
+   * Starts a federated sign-in with a POST, which can carry the anti-bot and agent-tool headers,
+   * and answers the provider's URL to navigate to. Sent with credentials, so the browser keeps the
+   * challenge cookie the answer sets.
+   */
+  federatedStart(
+    provider: string,
+    body: PassflowFederatedStartBody,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowFederatedStartResponse> {
+    return this.axiosClient.post<PassflowFederatedStartResponse, PassflowFederatedStartBody>(
+      `${PassflowEndpointPaths.signInWithProvider}${provider}`,
+      body,
+      callConfig(SIGN_IN_REQUEST_CONFIG, 'federated.start', undefined, options),
+    );
   }
 
   /**
@@ -132,7 +221,12 @@ export class AuthAPI {
     );
   }
 
-  signIn(payload: PassflowSignInPayload, deviceId: string, os: OS): Promise<PassflowAuthorizationResponse> {
+  signIn(
+    payload: PassflowSignInPayload,
+    deviceId: string,
+    os: OS,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowAuthorizationResponse> {
     const defaultPayload: PassflowSignInExtendedPayload = {
       ...payload,
       device: deviceId,
@@ -141,11 +235,11 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowAuthorizationResponse, PassflowSignInExtendedPayload>(
       PassflowEndpointPaths.signin,
       defaultPayload,
-      SIGN_IN_REQUEST_CONFIG,
+      callConfig(SIGN_IN_REQUEST_CONFIG, 'sign-in', payload.email ?? payload.phone ?? payload.username, options),
     );
   }
 
-  signUp(payload: PassflowSignUpPayload): Promise<PassflowAuthorizationResponse> {
+  signUp(payload: PassflowSignUpPayload, options?: PassflowAuthOptions): Promise<PassflowAuthorizationResponse> {
     const { create_tenant, anonymous } = payload;
     const defaultPayload: PassflowSignUpPayload = {
       ...payload,
@@ -155,7 +249,12 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowAuthorizationResponse, PassflowSignUpPayload>(
       PassflowEndpointPaths.signup,
       defaultPayload,
-      SIGN_IN_REQUEST_CONFIG,
+      callConfig(
+        SIGN_IN_REQUEST_CONFIG,
+        'sign-up',
+        payload.user.email ?? payload.user.phone_number ?? payload.user.username,
+        options,
+      ),
     );
   }
 
@@ -182,6 +281,7 @@ export class AuthAPI {
     payload: PassflowPasswordlessSignInPayload,
     deviceId: string,
     os: OS,
+    options?: PassflowAuthOptions,
   ): Promise<PassflowPasswordlessResponse> {
     const { create_tenant } = payload;
     const defaultPayload: PassflowPasswordlessSignInExtendedPayload = {
@@ -194,6 +294,7 @@ export class AuthAPI {
       return await this.axiosClient.post<PassflowPasswordlessResponse, PassflowPasswordlessSignInExtendedPayload>(
         PassflowEndpointPaths.passwordless,
         defaultPayload,
+        callConfig(undefined, 'passwordless.start', payload.email ?? payload.phone, options),
       );
     } catch (error) {
       throw toPlainError(error, PassflowEndpointPaths.passwordless, 'error.passwordless.start', TRY_AGAIN_LATER_MESSAGE);
@@ -201,12 +302,15 @@ export class AuthAPI {
   }
 
   /** Rejects only with a `PassflowError`, because its body holds the OTP. */
-  async passwordlessSignInComplete(payload: PassflowPasswordlessSignInCompletePayload): Promise<PassflowValidationResponse> {
+  async passwordlessSignInComplete(
+    payload: PassflowPasswordlessSignInCompletePayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowValidationResponse> {
     try {
       return await this.axiosClient.post<PassflowValidationResponse, PassflowPasswordlessSignInCompletePayload>(
         PassflowEndpointPaths.passwordlessComplete,
         payload,
-        SIGN_IN_REQUEST_CONFIG,
+        callConfig(SIGN_IN_REQUEST_CONFIG, undefined, undefined, options),
       );
     } catch (error) {
       throw toPlainError(
@@ -315,10 +419,14 @@ export class AuthAPI {
     return this.axiosClient.get<PassflowSessionValidationResponse>(PassflowEndpointPaths.validateSession);
   }
 
-  sendPasswordResetEmail(payload: PassflowSendPasswordResetEmailPayload): Promise<PassflowSuccessResponse> {
+  sendPasswordResetEmail(
+    payload: PassflowSendPasswordResetEmailPayload,
+    options?: PassflowAuthOptions,
+  ): Promise<PassflowSuccessResponse> {
     return this.axiosClient.post<PassflowSuccessResponse, typeof payload>(
       PassflowEndpointPaths.sendPasswordResetEmail,
       payload,
+      callConfig(undefined, 'password-reset.send', payload.email ?? payload.phone ?? payload.username, options),
     );
   }
 
@@ -347,6 +455,7 @@ export class AuthAPI {
     deviceId: string,
     os: OS,
     isAdmin = false,
+    options?: PassflowAuthOptions,
   ): Promise<PassflowPasskeyStart> {
     const { create_tenant } = payload;
     const defaultPayload: PassflowPasskeyRegisterStartExtendedPayload = {
@@ -358,7 +467,12 @@ export class AuthAPI {
 
     const endpoint = isAdmin ? PassflowAdminEndpointPaths.passkeyRegisterStart : PassflowEndpointPaths.passkeyRegisterStart;
 
-    return this.axiosClient.post<PassflowPasskeyStart, PassflowPasskeyRegisterStartExtendedPayload>(endpoint, defaultPayload);
+    // The admin routes are not covered by the anti-bot check.
+    return this.axiosClient.post<PassflowPasskeyStart, PassflowPasskeyRegisterStartExtendedPayload>(
+      endpoint,
+      defaultPayload,
+      callConfig(undefined, isAdmin ? undefined : 'passkey.register', payload.passkey_username, options),
+    );
   }
 
   passkeyRegisterComplete(
@@ -366,6 +480,7 @@ export class AuthAPI {
     deviceId: string,
     challengeId: string,
     isAdmin = false,
+    options?: PassflowAuthOptions,
   ): Promise<PassflowAuthorizationResponse> {
     const payload: PassflowPasskeyRegisterPayload = {
       challenge_id: challengeId,
@@ -380,7 +495,7 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowAuthorizationResponse, PassflowPasskeyRegisterPayload>(
       endpoint,
       payload,
-      SIGN_IN_REQUEST_CONFIG,
+      callConfig(SIGN_IN_REQUEST_CONFIG, undefined, undefined, options),
     );
   }
 
@@ -389,6 +504,7 @@ export class AuthAPI {
     deviceId: string,
     os: OS,
     isAdmin = false,
+    options?: PassflowAuthOptions,
   ): Promise<PassflowPasskeyStart> {
     const defaultPayload: PassflowPasskeyAuthenticateStartExtendedPayload = {
       ...payload,
@@ -404,6 +520,7 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowPasskeyStart, PassflowPasskeyAuthenticateStartExtendedPayload>(
       endpoint,
       defaultPayload,
+      callConfig(undefined, isAdmin ? undefined : 'passkey.authenticate', undefined, options),
     );
   }
 
@@ -412,6 +529,7 @@ export class AuthAPI {
     deviceId: string,
     challengeId: string,
     isAdmin = false,
+    options?: PassflowAuthOptions,
   ): Promise<PassflowAuthorizationResponse> {
     const payload: PassflowPasskeyAuthenticatePayload = {
       challenge_id: challengeId,
@@ -426,7 +544,7 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowAuthorizationResponse, PassflowPasskeyAuthenticatePayload>(
       endpoint,
       payload,
-      SIGN_IN_REQUEST_CONFIG,
+      callConfig(SIGN_IN_REQUEST_CONFIG, undefined, undefined, options),
     );
   }
 

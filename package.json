@@ -1,7 +1,7 @@
 {
   "name": "@passflow/core",
   "description": "Passflow JS SDK",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -16,7 +16,8 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./anti-bot-worker.js": "./dist/anti-bot-worker.js"
   },
   "files": [
     "dist/index.mjs",
@@ -24,7 +25,8 @@
     "dist/index.cjs",
     "dist/index.cjs.map",
     "dist/index.d.ts",
-    "dist/index.d.cts"
+    "dist/index.d.cts",
+    "dist/anti-bot-worker.js"
   ],
   "engines": {
     "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
@@ -34,7 +36,8 @@
     "watch": "vite build --watch",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "build:dts": "tsc -p tsconfig.build.json && rolldown -c rolldown.dts.config.mjs && rm -rf dist/.tsc",
-    "build": "pnpm clean && pnpm vite build && pnpm build:dts",
+    "build:worker": "rolldown -c rolldown.worker.config.mjs",
+    "build": "pnpm clean && pnpm vite build && pnpm build:worker && pnpm build:dts",
     "test": "vitest run --reporter=default",
     "test:services": "vitest run tests/services",
     "test:coverage": "vitest run --coverage",

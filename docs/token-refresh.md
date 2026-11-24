@@ -175,8 +175,8 @@ upgrade commit is the one exception.
 | Caller | Idle | Request in flight, or waiting for another tab | Retry pending | Session ended |
 |---|---|---|---|---|
 | `refreshToken()` | starts | waits for a request sent before its call, then sends its own (it wants tokens from a request sent at or after the call) | joins | rejects `error.refresh.session_ended` |
-| `getTokens(true)` / `session()` | starts if the access token is expired | joins | joins | resolves `undefined` |
-| `getTokensWithRefresh()` | starts if the access token is expired | joins | joins | resolves `undefined` |
+| `getTokens(true)` / `session({ doRefresh: true })` | starts if the access token is expired; with no refresh token, sends nothing and resolves `undefined` | joins | joins | resolves `undefined` |
+| `getTokensWithRefresh()` | starts if the access token is expired; with no refresh token, sends nothing and resolves with the cached tokens | joins | joins | resolves `undefined` |
 | SDK API call (JSON mode, access token expires within 30 s) | starts | joins | access token not yet expired: sends now with the current bearer; expired: joins | sends with no refresh |
 | Upgrade commit | sends the stored token under the lock | waits for the lock, at most 10 s, then `UpgradeCommitInterruptedError{reason:'lock-timeout'}` | a holder in backoff yields; sends at once | runs |
 
@@ -185,7 +185,11 @@ Resolution values:
 - `refreshToken()` resolves with the tokens this tab now has (own or adopted).
 - `getTokens(true)`, `session()` and `getTokensWithRefresh()` resolve with the cached tokens after
   the outcome: the kept tokens after a transient, blocked or auth-with-strikes-left failure.
-  `undefined` only after the session ended. `getTokensWithRefresh()` never rejects.
+  `undefined` after the session ended. `getTokensWithRefresh()` never rejects.
+- JSON mode with an expired access token and no refresh token: nothing is sent, and one `Error`
+  (`No refresh token found`) is emitted. `getTokens(true)` and `session({ doRefresh: true })`
+  resolve `undefined`, so `session()` calls `expiredSession`. `getTokensWithRefresh()` resolves
+  with the cached (expired) tokens.
 - Rejections:
   - this tab's own request failed: the request's error, a `PassflowError`. In a browser, a
     network failure (no answer) and a gateway 502/503/504 are `error.service.unavailable` (status 0, or the
@@ -323,7 +327,10 @@ releases the lock at once to a `logOut()` or an upgrade commit in another tab.
    token, clears storage and the cache, and emits one `SignOut{this-tab}`. Every tab of that user
    emits `SignOut{other-tab}`. `reset()` does the same synchronously, with no API call and no lock.
 8. **Emptied storage.** A tab that sees the shared storage emptied before any explaining message
-   waits up to 2 s for `session-ended` or `signed-out`, then ends with `SignOut{other-tab}`.
+   waits up to 2 s for `session-ended` or `signed-out`, then ends with `SignOut{other-tab}`. A tab
+   whose session has no refresh token does not wait: it ends as soon as its access token is gone
+   from storage. A missing refresh token alone does not end such a session. A tab that holds a
+   refresh token does end, after the same wait, when the stored one is removed.
 9. **Identity change.** If storage holds another user's tokens, a tab clears its cache, emits
    `SessionExpired{identity_changed}`, deletes nothing, then emits `SignIn{other-tab}` with the new
    user's tokens.
@@ -433,6 +440,15 @@ check on the answer's id token `sub`.
     It no longer reloads the cache from storage when the cache already holds tokens, so a held
     tab keeps its newer pair. `TokenCacheExpired{isExpired:true}` fires once per expiry, not once
     per `subscribe()`.
+14. (0.35.0) A new session (a sign-in, tokens in the URL, `setTokens()`) replaces the stored
+    one. In JSON mode a refresh token, ID token or scope list that the new session does not name is
+    removed from storage. A tab holding a refresh token gets `SignOut{other-tab}` after 2 s when
+    another tab replaces the session with an access-only one. An app that calls `setTokens()` with
+    only a new access token must pass every token it wants to keep; read the current ones with
+    `getTokens()` or `getCachedTokens()`.
+15. (0.35.0) A JSON session with no refresh token stays signed in while its access token is
+    stored. When that token is expired, `getTokens(true)` and `session({ doRefresh: true })`
+    resolve `undefined` instead of the expired tokens.
 
 **New**: `refreshCoordination`, `refreshStrikes`, `Passflow.dispose()`, the `RefreshFailing` and
 `RefreshRecovered` events, `PassflowRefreshError`, `RefreshErrorId`, `REFRESH_AUTH_FAILURE_IDS`,

@@ -56,6 +56,25 @@ export function pairOf(sub = 'user-1', options: { fresh?: boolean; sid?: string 
   };
 }
 
+/** An access token of `sub` with no refresh token, as a server without offline access answers. Expired unless `fresh`. */
+export const accessOnlyOf = (sub = 'user-1', fresh = true): Tokens => {
+  issued += 1;
+  return {
+    access_token: jwt({ sub, sid: 's1', exp: fresh ? FUTURE : EXPIRED, iat: lastIat, jti: `access-${issued}`, type: 'access' }),
+  };
+};
+
+/** Opens a tab whose `foreground()` brings the page to the foreground. */
+export function openTab(world: SdkWorld, id: string, platform: Partial<MockPlatform> = {}): Tab & { foreground: () => void } {
+  const listeners = new Set<() => void>();
+  const onForeground = vi.fn((listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  });
+  const tab = world.open(id, {}, { ...platform, onForeground });
+  return { ...tab, foreground: () => listeners.forEach((listener) => listener()) };
+}
+
 function claimsOf(token: string): { sub?: string; sid?: string } {
   try {
     const payload = token.split('.')[1] ?? '';

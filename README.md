@@ -877,7 +877,8 @@ const refreshToken = async () => {
   }
 };
 
-// Set tokens manually
+// Set tokens manually. They replace the stored session: pass every token you want to keep
+// (read the current ones with getTokens()).
 const setTokens = async (tokens) => {
   try {
     await passflow.setTokens({
@@ -1237,7 +1238,7 @@ Configuration options:
 | `getTokensCache()`         | Get current tokens             |
 | `getParsedTokenCache()`    | Get parsed tokens              |
 | `refreshToken()`           | Refresh the access token       |
-| `setTokens(tokens)`        | Set tokens manually            |
+| `setTokens(tokens)`        | Replace the stored tokens      |
 | `handleTokensRedirect()`   | Handle tokens from redirect    |
 | `authRedirectUrl(options)` | Generate an auth redirect URL  |
 | `authRedirect(options)`    | Redirect to hosted sign-in in the app's mode (async, see [Hosted Sign-In](#hosted-sign-in)) |

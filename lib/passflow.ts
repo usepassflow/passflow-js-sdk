@@ -822,7 +822,7 @@ export class Passflow {
           // URL tokens mean we're in JSON mode, not cookie/BFF mode
           // Clear any stored delivery mode to ensure consistent behavior
           this.storageManager.clearDeliveryMode();
-          this.storageManager.saveTokens(tokens);
+          this.storageManager.saveTokens(tokens, undefined, { replace: true });
           if (currentUrl) this.storageManager.setHostedSignIn(currentUrl.origin + currentUrl.pathname);
           this.tokenCacheService.setTokensCache(tokens);
           this.authService.refresh.sessionStarted();
@@ -1768,6 +1768,11 @@ export class Passflow {
    * Manually set tokens (useful after custom authentication flows).
    * This will save tokens to storage, update cache, and trigger SignIn event.
    *
+   * The tokens replace the stored session: in JSON mode a refresh token, ID token or scope list
+   * that is not passed is removed from storage. Pass every token you want to keep; read the
+   * current ones with `getTokens()`. In cookie and BFF modes only the ID token is stored, and the
+   * stored one stays when none is passed.
+   *
    * @param tokensData - Tokens object to set
    * @param tokensData.access_token - JWT access token
    * @param tokensData.refresh_token - Optional refresh token
@@ -1790,7 +1795,7 @@ export class Passflow {
     // saving the JSON keys there would be dropped as stale state on the next page load.
     const mode = this.getDeliveryMode();
     const opaque = mode === TokenDeliveryMode.Cookie || mode === TokenDeliveryMode.BFF;
-    this.storageManager.saveTokens(tokensData, opaque ? mode : undefined);
+    this.storageManager.saveTokens(tokensData, opaque ? mode : undefined, { replace: true });
     this.tokenCacheService.setTokensCache(tokensData);
     // A new session: the refresh controller starts over on these tokens.
     this.authService.refresh.sessionStarted();

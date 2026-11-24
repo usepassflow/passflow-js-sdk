@@ -345,16 +345,20 @@ export class AuthService {
    * A1): a tab that signed out, or whose session ended, refreshes again on the new one.
    */
   private async processAuthResponse(response: PassflowAuthorizationResponse, scopes: string[]): Promise<void> {
-    await this.applyAuthResponse(response, scopes);
+    await this.applyAuthResponse(response, scopes, { replace: true });
     this.refresh.sessionStarted();
   }
 
   /**
    * Stores an authentication response: token storage, session state, CSRF token. In BFF mode it
    * forwards the tokens to the BFF server first. Starts no session: a cookie-mode refresh applies
-   * its answer through here too.
+   * its answer through here too. `replace` marks a new session: see `StorageManager.saveTokens()`.
    */
-  private async applyAuthResponse(response: PassflowAuthorizationResponse, scopes: string[]): Promise<void> {
+  private async applyAuthResponse(
+    response: PassflowAuthorizationResponse,
+    scopes: string[],
+    options?: { replace: boolean },
+  ): Promise<void> {
     if (response.code && !response.access_token) {
       throw new Error('A PKCE authorization code was not exchanged, so there are no tokens to apply');
     }
@@ -378,7 +382,7 @@ export class AuthService {
     // Save tokens (conditional based on delivery mode)
     // In BFF mode, only ID token is saved locally
     response.scopes = scopes;
-    this.storageManager.saveTokens(response, this.tokenDeliveryManager.getMode());
+    this.storageManager.saveTokens(response, this.tokenDeliveryManager.getMode(), options);
     this.tokenCacheService.setTokensCache(response);
 
     // Store CSRF token if present (cookie mode)
@@ -2239,7 +2243,12 @@ export class AuthService {
 
       if (isTokenExpired(access)) {
         // we have an expired token: refresh it when asked (kept tokens if that fails)
-        if (doRefresh) return await this.refreshForSession();
+        if (doRefresh) {
+          const kept = await this.refreshForSession();
+          // An expired access token with no refresh token is not a session.
+          const refreshable = !!kept?.refresh_token || !!this.storageManager.getTokens()?.refresh_token;
+          return refreshable || !this.tokenCacheService.isExpired() ? kept : undefined;
+        }
 
         // we need return undefined here, because we have expired token and we no need to refresh it
         return undefined;

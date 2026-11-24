@@ -48,6 +48,9 @@
  *     one, a retired/ended/unordered cache, no message within the wait).
  *   - An end explains one emptying: once the view shows a token again, the ends heard before it
  *     last showed none, and the one a "keep" used, are spent.
+ * A missing refresh token is not an emptied storage for an access-only session: an access token is
+ * stored, no refresh token is, and this tab caches none. Such a session has nothing to send, and it
+ * ends when its access token is gone from storage or another user's tokens are stored.
  *
  * The fence emits no events and never touches the expiry flag or the token check: that is the
  * controller's job, which turns every verdict into the event sequence of architecture §2.4.
@@ -173,7 +176,8 @@ export interface CredentialFence {
   readonly lineage: RefreshLineage;
   /**
    * The storage read under the lock, before sending:
-   *   - no refresh token stored: kept or waiting (judgeEmptied) → "held"; else throws SessionEnded;
+   *   - an access-only session (nothing to send): "held";
+   *   - no refresh token stored otherwise: kept or waiting (judgeEmptied) → "held"; else throws SessionEnded;
    *   - the stored one is the cached one: "send";
    *   - another user's stored: throws IdentityChanged;
    *   - an ended one stored: "held" when the cache is ahead of it, else throws SessionEnded;
@@ -314,6 +318,10 @@ export function createCredentialFence(deps: CredentialFenceDeps): CredentialFenc
     return current.sid !== ref.sid || lineage.isAfter(current, ref);
   };
 
+  // An access-only session: an access token stored, and no refresh token stored or cached.
+  const accessOnly = (stored: Tokens | undefined): boolean =>
+    !!stored?.access_token && !stored.refresh_token && !cache.getTokens()?.refresh_token;
+
   const signedOutSince = (seq: number): boolean => {
     const sub = tabSubject();
     return signedOuts.some((each) => each.seq > seq && (!each.sub || !sub || each.sub === sub));
@@ -353,7 +361,8 @@ export function createCredentialFence(deps: CredentialFenceDeps): CredentialFenc
     if (verdict === 'wait' && !cancelEmptiedWait) {
       cancelEmptiedWait = schedule(() => {
         cancelEmptiedWait = undefined;
-        if (storedTokens()?.refresh_token) {
+        const stored = storedTokens();
+        if (stored?.refresh_token || accessOnly(stored)) {
           checkStoredSession();
           return;
         }
@@ -447,7 +456,7 @@ export function createCredentialFence(deps: CredentialFenceDeps): CredentialFenc
   // The standing watch: another tab's write, or this tab waking.
   const checkStoredSession = (): void => {
     const stored = storedTokens();
-    if (!stored?.refresh_token) {
+    if (!stored?.refresh_token && !accessOnly(stored)) {
       if (judgeEmptied() === 'end') onSessionLost?.('emptied');
       return;
     }
@@ -466,6 +475,7 @@ export function createCredentialFence(deps: CredentialFenceDeps): CredentialFenc
 
   const checkStoredBeforeSend = (): StoredVerdict => {
     const stored = storedTokens();
+    if (accessOnly(stored)) return 'held';
     if (!stored?.refresh_token) {
       // Kept (or waiting for the end message) over an emptied storage: nothing to send, keep the cache.
       if (judgeEmptied() === 'end') throw new SessionEnded('emptied');

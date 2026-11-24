@@ -144,8 +144,13 @@ export class StorageManager {
    * Save tokens to storage with conditional logic based on delivery mode
    * In cookie/BFF mode: ONLY save ID token (not access/refresh tokens)
    * In JSON mode: save all tokens (existing behavior)
+   *
+   * A token or scope list that `tokens` does not name stays stored, as a refresh answer needs. With
+   * `replace` (a new session) and an access token, in JSON mode, it is removed instead, so nothing
+   * of the previous session is left beside the new one. Another app's tokens always stay, and so
+   * do its scopes when only its session is stored.
    */
-  saveTokens(tokens: Tokens, deliveryMode?: TokenDeliveryMode): void {
+  saveTokens(tokens: Tokens, deliveryMode?: TokenDeliveryMode, options?: { replace?: boolean }): void {
     const { id_token, access_token, refresh_token, scopes } = tokens;
 
     if (deliveryMode === TokenDeliveryMode.Cookie || deliveryMode === TokenDeliveryMode.BFF) {
@@ -155,6 +160,13 @@ export class StorageManager {
       }
       // Do NOT save access_token or refresh_token in localStorage
     } else {
+      if (options?.replace && access_token) {
+        // Decided before anything is removed, as in deleteTokens().
+        const keepScopes = this.holdsOnlyOtherAppSession();
+        if (!id_token) this.removeOwnToken(this.getKeyForTokenType(TokenType.id_token));
+        if (!refresh_token) this.removeOwnToken(this.getKeyForTokenType(TokenType.refresh_token));
+        if (!scopes && !keepScopes) this.removePrefixed(this.scopes, SCOPES_KEY);
+      }
       // JSON mode: save all tokens (existing behavior)
       if (id_token) this.storage.setItem(this.getKeyForTokenType(TokenType.id_token), id_token);
       if (access_token) this.storage.setItem(this.getKeyForTokenType(TokenType.access_token), access_token);

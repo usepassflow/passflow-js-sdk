@@ -213,7 +213,7 @@ describe('AuthService', () => {
 
       await authService.signIn(payload);
 
-      expect(mockStorageManager.saveTokens).toHaveBeenCalledWith(mockAuthResponse, 'json_body');
+      expect(mockStorageManager.saveTokens).toHaveBeenCalledWith(mockAuthResponse, 'json_body', { replace: true });
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(PassflowEvent.SignIn, {
         tokens: mockAuthResponse,
         parsedTokens: mockParsedTokens,
@@ -261,7 +261,7 @@ describe('AuthService', () => {
 
       await authService.signUp(payload);
 
-      expect(mockStorageManager.saveTokens).toHaveBeenCalledWith(mockAuthResponse, 'json_body');
+      expect(mockStorageManager.saveTokens).toHaveBeenCalledWith(mockAuthResponse, 'json_body', { replace: true });
       expect(mockSubscribeStore.notify).toHaveBeenCalledWith(PassflowEvent.Register, {
         tokens: mockAuthResponse,
         parsedTokens: mockParsedTokens,

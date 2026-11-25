@@ -10,7 +10,7 @@ import { StorageManager } from '../../lib/storage';
 import { TokenDeliveryMode } from '../../lib/token/delivery-manager';
 import type { Tokens } from '../../lib/types';
 import { TEST_CONFIG, VALID_TOKENS } from '../helpers/fixtures';
-import { jwt } from '../refresh/jwt';
+import { jwt, pair } from '../refresh/jwt';
 
 const KEYS = ['passflow_id_token', 'passflow_csrf_token', 'passflow_delivery_mode', 'passflow_session_state'];
 const storedFor = (appId: string) => KEYS.map((key) => localStorage.getItem(`${key}:${appId}`));
@@ -192,7 +192,7 @@ describe('setAppId() while a request for the previous app is unanswered', () => 
       },
     );
 
-    test('an instance built without an app id checks the session again for the app id it is given', async () => {
+    test('an instance built without an app id keeps the answer of its first check for the app id it is given', async () => {
       const first = held<Response>();
       const fetch = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(status(true));
       vi.stubGlobal('fetch', fetch);
@@ -204,8 +204,65 @@ describe('setAppId() while a request for the previous app is unanswered', () => 
       first.resolve(status(true));
       await settle();
 
-      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch).toHaveBeenCalledTimes(1);
       expect(localStorage.getItem('passflow_session_state:app-x')).toBe('valid');
+    });
+  });
+
+  describe('setAppId() that changes no app', () => {
+    const appId = TEST_CONFIG.appId as string;
+    const stored = () => new StorageManager({ storage: localStorage, appId }).getTokens()?.refresh_token;
+
+    test.each([
+      ['the same app id', appId],
+      ['the first app id of an instance built without one', undefined],
+    ])('JSON mode: a refresh in flight when setAppId gives %s still stores its new token', async (_name, builtWith) => {
+      const answer = held<Tokens>();
+      const refreshToken = vi.spyOn(AuthAPI.prototype, 'refreshToken').mockReturnValue(answer.promise as never);
+      const instance = new Passflow({ ...TEST_CONFIG, appId: builtWith, refreshCoordination: 'none' });
+      sdk = instance;
+      instance.setTokens(pair(100));
+
+      const refresh = instance.refreshToken().catch(() => undefined);
+      await vi.waitFor(() => expect(refreshToken).toHaveBeenCalledTimes(1));
+      instance.setAppId(appId);
+      const issued = pair(200);
+      answer.resolve(issued);
+      await refresh;
+      await settle();
+
+      expect(stored()).toBe(issued.refresh_token);
+      expect(instance.getCachedTokens()?.refresh_token).toBe(issued.refresh_token);
+    });
+
+    test('cookie mode: setAppId with the same app id checks the session no second time', async () => {
+      seedCookieSession('app-a');
+      const validateSession = vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ id: 'user-1' });
+      const instance = new Passflow({ ...TEST_CONFIG, appId: 'app-a', refreshCoordination: 'none' });
+      sdk = instance;
+      await settle();
+
+      instance.setAppId('app-a');
+      instance.setAppId('app-a');
+      await settle();
+
+      expect(validateSession).toHaveBeenCalledTimes(1);
+      expect(instance.isAuthenticated()).toBe(true);
+    });
+
+    test("cookie mode: setAppId to another app checks that app's session", async () => {
+      seedCookieSession('app-a');
+      seedCookieSession('app-b');
+      const validateSession = vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ id: 'user-1' });
+      const instance = new Passflow({ ...TEST_CONFIG, appId: 'app-a', refreshCoordination: 'none' });
+      sdk = instance;
+      await settle();
+
+      instance.setAppId('app-b');
+      await settle();
+
+      expect(validateSession).toHaveBeenCalledTimes(2);
+      expect(localStorage.getItem('passflow_session_state:app-b')).toBe('valid');
     });
   });
 });

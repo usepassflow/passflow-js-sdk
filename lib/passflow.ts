@@ -393,6 +393,7 @@ export class Passflow {
    * ```
    */
   setAppId(appId: string): void {
+    if (appId === this.appId) return;
     this.appId = appId;
     this.storageManager.setAppId(appId);
     this.appSettingsRead = undefined;

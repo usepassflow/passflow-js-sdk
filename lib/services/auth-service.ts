@@ -258,10 +258,14 @@ export class AuthService {
 
   /** The app id used for `client_id`, the override check, federated starts and landings. */
   setAppId(appId: string): void {
+    const previous = this.appId;
+    if (appId === previous) return;
     this.appId = appId;
     // The delivery mode and session state are stored per app.
     this.tokenDeliveryManager.reload();
     this.setBffModeIfConfigured();
+    // The first app id names the app the instance worked for so far: what is on its way stays.
+    if (!previous) return;
     // An answer still on its way was asked for the previous app: it is not applied to this one.
     this.refresh.sessionStarted();
     // The check that page load started was for the previous app: check this app's session.

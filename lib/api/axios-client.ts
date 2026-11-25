@@ -16,7 +16,7 @@ import type { PlatformAdapter } from '../platform';
 import { webAdapter } from '../platform';
 import { StorageManager } from '../storage';
 import { isTokenExpired, parseToken, TokenService } from '../token';
-import { TokenDeliveryManager } from '../token/delivery-manager';
+import { TokenDeliveryManager, TokenDeliveryMode } from '../token/delivery-manager';
 import type { Tokens } from '../types';
 import type { UpgradeChallenge } from '../upgrade/challenge';
 import { parseUpgradeChallenge } from '../upgrade/challenge';
@@ -88,6 +88,8 @@ export type AxiosUpgradeHandler = (error: AxiosError, challenge: UpgradeChalleng
  * `allowStale` is true when the access token is inside the 30 s window but not yet expired: during
  * a pending retry the controller then resolves at once and the call goes out with the current
  * bearer instead of waiting for the retry.
+ *
+ * In cookie and BFF mode the same handler runs after a 401 instead, with `allowStale` false.
  */
 export type AxiosRefreshHandler = (request: { trigger: 'pre-request'; allowStale: boolean }) => Promise<Tokens | undefined>;
 
@@ -148,6 +150,9 @@ const isLogoutEndpoint = (url?: string): boolean => url?.includes('logout') ?? f
 
 /** Config key marking a request that authenticates with the bearer it carries. Never sent on the wire. */
 const OWN_BEARER_MARKER = '__passflowOwnBearer';
+
+/** Config key marking a request already refreshed for after a 401. Never sent on the wire. */
+const REFRESHED_AFTER_401_MARKER = '__passflowRefreshedAfter401';
 
 const hasOwnBearer = (config: unknown): boolean =>
   typeof config === 'object' && config !== null && (config as Record<string, unknown>)[OWN_BEARER_MARKER] === true;
@@ -354,6 +359,10 @@ export class AxiosClient {
           !hasOwnBearer(e.config) &&
           !this.isUpgradeTransactionError(e)
         ) {
+          // Cookie and BFF mode: the access cookie cannot be read, so its expiry shows as this 401.
+          if (e.config && (await this.refreshedAfterUnauthorized(e.config))) {
+            return this.instance.request(e.config);
+          }
           this.tokenDeliveryManager.setSessionInvalid();
         }
 
@@ -459,6 +468,34 @@ export class AxiosClient {
 
   private isProtectedEndpoint(url?: string): boolean {
     return this.protectedEndpoints.some((endpoint) => url?.includes(endpoint));
+  }
+
+  /**
+   * After a 401 in cookie or BFF mode: one refresh through the handler, at most once per request.
+   * True when the session was refreshed and the request is to be sent again. False for a request
+   * that does not carry the session, a second 401 of the same request, a failed refresh and an
+   * ended session: the 401 then stands.
+   */
+  private async refreshedAfterUnauthorized(config: InternalAxiosRequestConfig): Promise<boolean> {
+    const marked = config as InternalAxiosRequestConfig & { [REFRESHED_AFTER_401_MARKER]?: boolean };
+    // The stored mode, not the one this client loaded when it was built: a sign-in may have set it since.
+    const mode = this.storageManager.getDeliveryMode();
+    if (
+      !this.refreshHandler ||
+      marked[REFRESHED_AFTER_401_MARKER] ||
+      (mode !== TokenDeliveryMode.Cookie && mode !== TokenDeliveryMode.BFF) ||
+      this.isNonAuthEndpoint(config.url) ||
+      isLogoutEndpoint(config.url)
+    ) {
+      return false;
+    }
+    marked[REFRESHED_AFTER_401_MARKER] = true;
+    try {
+      // The controller runs one refresh for every call that asks while it is pending.
+      return (await this.refreshHandler({ trigger: 'pre-request', allowStale: false })) !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   private isNonAuthEndpoint(url?: string): boolean {

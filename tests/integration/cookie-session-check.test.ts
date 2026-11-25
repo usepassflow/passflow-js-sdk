@@ -53,11 +53,14 @@ describe('the cookie-mode session check on load', () => {
   ])('a 200 that is not the user (%s) marks the session invalid', async (_name, body) => {
     answerUserMe(() => Promise.resolve(body));
     const sdk = new Passflow(TEST_CONFIG);
+    const restored: unknown[] = [];
+    sdk.subscribe({ onAuthChange: (event, payload) => event === PassflowEvent.SessionRestored && restored.push(payload) });
 
     expect(await sdk.restoreSession()).toBe(false);
 
     expect(localStorage.getItem(SESSION_KEY)).toBe('invalid');
     expect(sdk.isAuthenticated()).toBe(false);
+    expect(restored).toEqual([]);
   });
 
   test('a 401 marks the session invalid', async () => {

@@ -214,7 +214,8 @@ export class TokenCacheService {
 
       // Cookie mode: access_token may not be available (in HttpOnly cookie)
       // In cookie mode, we cannot check expiry client-side, so just return tokens
-      // Server will handle refresh via 401 response and axios interceptor
+      // An expired access cookie shows as a 401 on an API call; the API client then refreshes
+      // and sends that call once more
       if (!this.tokensCache.access_token) {
         return this.tokensCache;
       }

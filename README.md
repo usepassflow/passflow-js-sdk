@@ -16,8 +16,12 @@
   so those calls went out without them until the next page load.
 - Fixed: `setAppId()` reloads the in-memory token cache, so `getCachedTokens()` returns what is
   stored for the new app and no longer the previous app's tokens.
-- Fixed: a token refresh or page-load session check still unanswered when `setAppId()` runs no
-  longer applies its answer to the new app. It changes nothing for the new app once it arrives.
+- Fixed: a token refresh, step-up commit or page-load session check still unanswered when
+  `setAppId()` runs no longer applies its answer to the new app, and `setAppId()` checks the new
+  app's cookie or BFF session itself. A step-up commit answered after the switch rejects with
+  `UpgradeCommitInterruptedError` (`superseded`).
+- Fixed: a sign-in answer whose tokens were issued for another app than the current app id is
+  refused with an error and stores nothing.
 
 ### Version 0.35.2
 

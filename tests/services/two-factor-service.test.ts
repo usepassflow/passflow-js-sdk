@@ -147,7 +147,7 @@ describe('TwoFactorService', () => {
         false,
         'https://auth.example.com',
         {},
-        'app-1',
+        'test-app-id',
         undefined,
         createMockPlatform() as never,
         async () => pkceEnabled,

@@ -1430,6 +1430,7 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
       sent = verdict.kind === 'send' ? verdict.sent : { refreshToken: token, order: orderOf(token) ?? { fp: token } };
     }
     const sentAt = now();
+    const sentGeneration = generation;
     emit('refresh:start', {});
     let result: PassflowAuthorizationResponse;
     try {
@@ -1447,6 +1448,12 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
       throw error;
     }
     if (!sent) {
+      // A new session or another app id since the send: the answer is not this session's.
+      if (sentGeneration !== generation) {
+        const error = new UpgradeCommitInterruptedError('superseded');
+        emitError('upgrade.commit', 'upgrade', error);
+        throw error;
+      }
       await transport.applyOpaque(result);
       cache.setTokensCache({ ...(storage.getTokens() ?? {}), ...tokensOf(result, undefined) });
       upgradeSucceeded(sentAt);

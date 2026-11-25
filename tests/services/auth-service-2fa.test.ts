@@ -92,7 +92,7 @@ describe('AuthService — a sign-in pending its second factor', () => {
       false,
       'https://auth.example.com',
       { createSession },
-      'app-1',
+      'test-app-id',
       undefined,
       platform as unknown as PlatformAdapter,
     );
@@ -190,7 +190,7 @@ describe('AuthService — a sign-in pending its second factor', () => {
       false,
       'https://auth.example.com',
       { createSession },
-      'app-1',
+      'test-app-id',
       undefined,
       platform as unknown as PlatformAdapter,
       async () => false,

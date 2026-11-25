@@ -187,7 +187,7 @@ describe('AxiosClient: a 401 in cookie or BFF mode', () => {
   });
 });
 
-describe('Passflow in cookie mode: 401s of calls made together', () => {
+describe('Passflow in cookie mode', () => {
   let passflow: Passflow | undefined;
 
   afterEach(() => {
@@ -223,6 +223,35 @@ describe('Passflow in cookie mode: 401s of calls made together', () => {
 
     expect(refreshToken).toHaveBeenCalledTimes(1);
     expect(sent).toHaveLength(4);
+    expect(sent.slice(2).map((config) => config.headers['X-CSRF-Token'])).toEqual(['csrf-2', 'csrf-2']);
     expect(instance.isAuthenticated()).toBe(true);
+  });
+
+  test('a cookie-mode sign-in on a page built in JSON mode: the next call carries credentials and the CSRF token', async () => {
+    localStorage.clear();
+    vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ id: 'user-1' });
+    vi.spyOn(AuthAPI.prototype, 'signIn').mockResolvedValue({
+      id_token: idToken(),
+      csrf_token: 'csrf-1',
+      token_delivery: 'cookie',
+    } as never);
+    const instance = new Passflow({ ...TEST_CONFIG, refreshCoordination: 'none' });
+    passflow = instance;
+    const sent: InternalAxiosRequestConfig[] = [];
+    const userClient = (instance as unknown as { userApi: { axiosClient: unknown } }).userApi.axiosClient as {
+      instance: { defaults: { adapter: Adapter } };
+    };
+    userClient.instance.defaults.adapter = (config) => {
+      sent.push(config);
+      return Promise.resolve({ ...ok(config), data: [] });
+    };
+
+    await instance.signIn({ email: 'user@example.com', password: 'Password1!' });
+    await instance.getUserPasskeys();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.withCredentials).toBe(true);
+    expect(sent[0]?.headers['X-CSRF-Token']).toBe('csrf-1');
+    expect(sent[0]?.headers.Authorization).toBeUndefined();
   });
 });

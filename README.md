@@ -11,6 +11,11 @@
   the session is marked invalid, as before. `/auth/refresh`, logout, the sign-in calls, the hosted
   session's calls, calls made with their own bearer and step-up 401s are not sent again. This
   needs a Passflow server that answers 401 for a missing or expired access token.
+- Fixed: after the first cookie-mode sign-in on a page, API calls carry `withCredentials` and the
+  `X-CSRF-Token` header at once. Each API client kept the delivery mode it read when it was built,
+  so those calls went out without them until the next page load.
+- Fixed: `setAppId()` reloads the in-memory token cache, so `getCachedTokens()` returns what is
+  stored for the new app and no longer the previous app's tokens.
 
 ### Version 0.35.2
 

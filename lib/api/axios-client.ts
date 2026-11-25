@@ -275,8 +275,9 @@ export class AxiosClient {
         return axiosConfig;
       }
 
-      // Cookie mode handling
-      if (this.tokenDeliveryManager.isCookieMode()) {
+      // Cookie mode handling. The stored mode, not the one this client loaded when it was built:
+      // a sign-in on this page may have set it since.
+      if (this.storageManager.getDeliveryMode() === TokenDeliveryMode.Cookie) {
         // Browser automatically sends HttpOnly cookies
         // Do NOT add Authorization header
         axiosConfig.withCredentials = true;

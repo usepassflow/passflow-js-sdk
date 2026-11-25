@@ -66,6 +66,11 @@ export class StorageManager {
     this.appId = appId || undefined;
   }
 
+  /** The app id set at construction or by `setAppId()`, or undefined when there is none. */
+  getAppId(): string | undefined {
+    return this.appId;
+  }
+
   /** The stored value, or undefined when it is a JWT issued for another app than this one. */
   private ownToken(value: string | null): string | undefined {
     if (!value) return undefined;

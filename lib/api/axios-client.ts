@@ -617,6 +617,7 @@ export class AxiosClient {
    */
   setAppId(appId: string): void {
     this.appId = appId;
+    this.tokenDeliveryManager.reloadSessionState();
 
     // Update default headers
     this.defaultHeaders = {

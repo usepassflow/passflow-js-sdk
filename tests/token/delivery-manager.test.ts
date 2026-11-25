@@ -261,6 +261,71 @@ describe('TokenDeliveryManager', () => {
     });
   });
 
+  describe('session state key per app', () => {
+    const managerOf = (appId: string) => new TokenDeliveryManager(new StorageManager({ storage: fakeStorage, appId }));
+
+    test('with an app id the state is stored under the key of that app, not the plain key', () => {
+      managerOf('app-a').setSessionValid();
+
+      expect(fakeStorage.getItem('passflow_session_state:app-a')).toBe(SessionState.Valid);
+      expect(fakeStorage.data.has('passflow_session_state')).toBe(false);
+      expect(managerOf('app-a').getSessionState()).toBe(SessionState.Valid);
+    });
+
+    test('two apps over one storage do not see each other', () => {
+      managerOf('app-a').setSessionValid();
+      managerOf('app-b').setSessionInvalid();
+
+      expect(managerOf('app-a').getSessionState()).toBe(SessionState.Valid);
+      expect(managerOf('app-b').getSessionState()).toBe(SessionState.Invalid);
+    });
+
+    test('a value under the plain key is ignored when an app id is set', () => {
+      fakeStorage.setItem('passflow_session_state', SessionState.Invalid);
+
+      expect(managerOf('app-a').getSessionState()).toBe(SessionState.Unknown);
+    });
+
+    test('after setAppId the next write goes to the key of the new app', () => {
+      const appStorage = new StorageManager({ storage: fakeStorage, appId: 'app-a' });
+      const manager = new TokenDeliveryManager(appStorage);
+      manager.setSessionValid();
+
+      appStorage.setAppId('app-b');
+      manager.setSessionInvalid();
+
+      expect(fakeStorage.getItem('passflow_session_state:app-a')).toBe(SessionState.Valid);
+      expect(fakeStorage.getItem('passflow_session_state:app-b')).toBe(SessionState.Invalid);
+    });
+
+    test('reloadSessionState reads the state of the app the storage now names', () => {
+      managerOf('app-b').setSessionInvalid();
+      const appStorage = new StorageManager({ storage: fakeStorage, appId: 'app-a' });
+      const manager = new TokenDeliveryManager(appStorage);
+      manager.setSessionValid();
+
+      appStorage.setAppId('app-b');
+      manager.reloadSessionState();
+      expect(manager.getSessionState()).toBe(SessionState.Invalid);
+
+      appStorage.setAppId('app-c');
+      manager.reloadSessionState();
+      expect(manager.getSessionState()).toBe(SessionState.Unknown);
+      expect(fakeStorage.getItem('passflow_session_state:app-a')).toBe(SessionState.Valid);
+    });
+
+    test('reset removes the key of the app and leaves the plain key', () => {
+      fakeStorage.setItem('passflow_session_state', SessionState.Valid);
+      const manager = managerOf('app-a');
+      manager.setSessionValid();
+
+      manager.reset();
+
+      expect(fakeStorage.data.has('passflow_session_state:app-a')).toBe(false);
+      expect(fakeStorage.getItem('passflow_session_state')).toBe(SessionState.Valid);
+    });
+  });
+
   describe('storage key namespacing', () => {
     test('should use namespaced storage keys', () => {
       deliveryManager.setMode(TokenDeliveryMode.Cookie);

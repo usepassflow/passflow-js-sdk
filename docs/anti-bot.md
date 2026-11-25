@@ -98,6 +98,9 @@ click and before any await (settings read, PKCE, the POST and its solve), and fo
 it is known. A platform adapter can do the same with
 `openPendingAuthUrl`; one without it gets `openAuthUrl(auth_url)` once the URL is known.
 
+An `auth_url` that is not an http or https address is never followed: the start fails with an
+`Error` reported as `federated.redirect` or `federated.popup`, and a pending popup is closed.
+
 `createFederatedAuthUrl` still builds the GET start, which a `human_only` app refuses.
 
 The start answer sets a `SameSite=Lax` cookie the provider's callback needs. A browser keeps it only

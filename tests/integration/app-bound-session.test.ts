@@ -48,17 +48,6 @@ describe("another app's session on the same origin", () => {
     expect(new StorageManager({ storage: localStorage, prefix: 'b', appId: 'app-b' }).getIdToken()).toBe(bId);
   });
 
-  test('a prefixed app signs out although another app wrote the shared cookie-mode id token after its sign-in', async () => {
-    const a = new Passflow({ ...TEST_CONFIG, keyStoragePrefix: 'a' });
-    a.setTokens(VALID_TOKENS);
-    expect(a.isAuthenticated()).toBe(true);
-    localStorage.setItem('passflow_id_token', idTokenFor('another-app'));
-
-    await a.logOut();
-
-    expect(new Passflow({ ...TEST_CONFIG, keyStoragePrefix: 'a' }).isAuthenticated()).toBe(false);
-  });
-
   test("mixed keys: A's logOut signs A out while B's id token stays", async () => {
     const bId = idTokenFor('app-b');
     localStorage.setItem('id_token', bId);
@@ -111,13 +100,134 @@ describe("another app's session on the same origin", () => {
   });
 });
 
+describe('the delivery mode, CSRF token and cookie-mode id token of two apps on one storage', () => {
+  const KEYS = ['passflow_delivery_mode', 'passflow_csrf_token', 'passflow_id_token'];
+  const keysOf = (appId: string) => Object.fromEntries(KEYS.map((key) => [key, localStorage.getItem(`${key}:${appId}`)]));
+  const modeOf = (sdk: Passflow) =>
+    (
+      sdk as unknown as { authService: { tokenDeliveryManager: TokenDeliveryManager } }
+    ).authService.tokenDeliveryManager.getMode();
+
+  // What a cookie-mode sign-in of `appId` leaves in storage.
+  const storeCookieSession = (appId: string) => {
+    const storage = new StorageManager({ storage: localStorage, appId });
+    storage.setDeliveryMode(TokenDeliveryMode.Cookie);
+    storage.setIdToken(idTokenFor(appId));
+    storage.setCsrfToken(`csrf-${appId}`);
+    return keysOf(appId);
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.spyOn(AuthAPI.prototype, 'logOut').mockResolvedValue({ status: 'ok' } as never);
+    // The cookie-mode check on load stays unanswered: these tests are about the stored keys.
+    vi.spyOn(AuthAPI.prototype, 'validateSession').mockReturnValue(new Promise(() => {}));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  test('each value is stored under the key of its app', () => {
+    const stored = storeCookieSession('app-b');
+
+    expect(stored).toEqual({
+      passflow_delivery_mode: 'cookie',
+      passflow_csrf_token: 'csrf-app-b',
+      passflow_id_token: idTokenFor('app-b'),
+    });
+    for (const key of KEYS) expect(localStorage.getItem(key)).toBeNull();
+  });
+
+  test("a JSON-token app constructed beside B's cookie-mode session stays in JSON mode and leaves B's keys", () => {
+    const stored = storeCookieSession('app-b');
+
+    const a = new Passflow(TEST_CONFIG);
+    a.setTokens(VALID_TOKENS);
+
+    expect(modeOf(a)).toBe(TokenDeliveryMode.JsonBody);
+    expect(a.isAuthenticated()).toBe(true);
+    expect(localStorage.getItem('access')).toBe(VALID_TOKENS.access_token);
+    expect(keysOf('app-b')).toEqual(stored);
+  });
+
+  test("a JSON-token app's sign-out leaves B's cookie-mode keys", async () => {
+    const stored = storeCookieSession('app-b');
+    const a = new Passflow(TEST_CONFIG);
+    a.setTokens(VALID_TOKENS);
+
+    await a.logOut();
+
+    expect(a.isAuthenticated()).toBe(false);
+    expect(keysOf('app-b')).toEqual(stored);
+    expect(new Passflow({ ...TEST_CONFIG, appId: 'app-b' }).isAuthenticated()).toBe(true);
+  });
+
+  test("two cookie-mode apps: A's sign-out removes A's keys and leaves B's", async () => {
+    storeCookieSession('app-a');
+    const stored = storeCookieSession('app-b');
+    const a = new Passflow({ ...TEST_CONFIG, appId: 'app-a' });
+    expect(a.isAuthenticated()).toBe(true);
+
+    await a.logOut();
+
+    expect(keysOf('app-a')).toEqual({ passflow_delivery_mode: null, passflow_csrf_token: null, passflow_id_token: null });
+    expect(keysOf('app-b')).toEqual(stored);
+    expect(new Passflow({ ...TEST_CONFIG, appId: 'app-b' }).isAuthenticated()).toBe(true);
+  });
+
+  test('an app with an app id does not read values stored under the plain keys', () => {
+    const plain = new StorageManager({ storage: localStorage });
+    plain.setDeliveryMode(TokenDeliveryMode.Cookie);
+    plain.setIdToken(idTokenFor('app-a'));
+    plain.setCsrfToken('csrf-plain');
+
+    const a = new Passflow({ ...TEST_CONFIG, appId: 'app-a' });
+
+    expect(modeOf(a)).toBe(TokenDeliveryMode.JsonBody);
+    expect(a.isAuthenticated()).toBe(false);
+    expect(new StorageManager({ storage: localStorage, appId: 'app-a' }).getCsrfToken()).toBeUndefined();
+  });
+
+  test('with no app id the values are stored under the plain keys', () => {
+    const plain = new StorageManager({ storage: localStorage });
+    plain.setDeliveryMode(TokenDeliveryMode.Cookie);
+    plain.setIdToken(idTokenFor('app-a'));
+    plain.setCsrfToken('csrf-plain');
+
+    expect(localStorage.getItem('passflow_delivery_mode')).toBe('cookie');
+    expect(localStorage.getItem('passflow_id_token')).toBe(idTokenFor('app-a'));
+    expect(localStorage.getItem('passflow_csrf_token')).toBe('csrf-plain');
+  });
+
+  test("setAppId to B loads B's stored delivery mode", () => {
+    storeCookieSession('app-b');
+    const sdk = new Passflow(TEST_CONFIG);
+    expect(modeOf(sdk)).toBe(TokenDeliveryMode.JsonBody);
+
+    sdk.setAppId('app-b');
+
+    expect(modeOf(sdk)).toBe(TokenDeliveryMode.Cookie);
+    expect(sdk.isAuthenticated()).toBe(true);
+  });
+
+  test("setAppId to B puts the HTTP client in B's delivery mode", () => {
+    storeCookieSession('app-b');
+    const sdk = new Passflow(TEST_CONFIG);
+    const client = (sdk as unknown as { authApi: { axiosClient: { tokenDeliveryManager: TokenDeliveryManager } } }).authApi
+      .axiosClient;
+    expect(client.tokenDeliveryManager.isCookieMode()).toBe(false);
+
+    sdk.setAppId('app-b');
+
+    expect(client.tokenDeliveryManager.isCookieMode()).toBe(true);
+  });
+});
+
 describe('the session state of two apps on the same origin', () => {
   const BFF = { tokenExchange: { enabled: true, callbackUrl: 'https://app.example.com/api/auth/callback' } };
   const open = (appId: string) => new Passflow({ ...TEST_CONFIG, appId, ...BFF });
   const sessionOf = (sdk: Passflow) =>
     (sdk as unknown as { authService: { tokenDeliveryManager: TokenDeliveryManager } }).authService.tokenDeliveryManager;
 
-  // What a BFF sign-in leaves behind: the app's id token under the key both apps share, and a valid session.
+  // What a BFF sign-in leaves behind: the app's id token and a valid session.
   const signIn = (sdk: Passflow, appId: string) => {
     new StorageManager({ storage: localStorage, appId }).setIdToken(idTokenFor(appId));
     sessionOf(sdk).setSessionValid();
@@ -132,7 +242,6 @@ describe('the session state of two apps on the same origin', () => {
   test("A's logOut leaves B's session state valid", async () => {
     const a = open('app-a');
     const b = open('app-b');
-    // A signs in last, so the shared id token is A's and its logOut clears a session of its own.
     signIn(b, 'app-b');
     signIn(a, 'app-a');
 
@@ -142,10 +251,9 @@ describe('the session state of two apps on the same origin', () => {
     expect(sessionOf(open('app-b')).getSessionState()).toBe(SessionState.Valid);
   });
 
-  test("A's logOut removes A's stored state when the shared id token is B's", async () => {
+  test("A's logOut removes A's stored state and leaves B's", async () => {
     const a = open('app-a');
     const b = open('app-b');
-    // B signs in last, so the only stored token is B's.
     signIn(a, 'app-a');
     signIn(b, 'app-b');
 
@@ -158,7 +266,6 @@ describe('the session state of two apps on the same origin', () => {
   test("A's session marked invalid leaves B signed in", () => {
     const a = open('app-a');
     const b = open('app-b');
-    // B signs in last, so the shared id token is the one B can read.
     signIn(a, 'app-a');
     signIn(b, 'app-b');
 

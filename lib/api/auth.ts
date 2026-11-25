@@ -415,7 +415,7 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowLogoutResponse, typeof payload>(endpoint, payload);
   }
 
-  /** Reads the signed-in user. Any 2xx means the session is valid; an invalid session rejects. */
+  /** Reads the signed-in user. An invalid session rejects. */
   validateSession(): Promise<PassflowSessionUser> {
     return this.axiosClient.get<PassflowSessionUser>(PassflowEndpointPaths.validateSession);
   }

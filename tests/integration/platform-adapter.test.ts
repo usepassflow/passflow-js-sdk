@@ -174,6 +174,10 @@ function buildMockStorageManager() {
     clearIdToken: vi.fn(),
     clearCsrfToken: vi.fn(),
     getDeviceId: vi.fn().mockReturnValue('device-123'),
+    appKey: vi.fn((name: string) => name),
+    getDeliveryMode: vi.fn().mockReturnValue(undefined),
+    setDeliveryMode: vi.fn(),
+    clearDeliveryMode: vi.fn(),
   };
 }
 

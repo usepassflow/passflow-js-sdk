@@ -16,7 +16,7 @@ import { accessOnlyOf, createSdkWorld, FUTURE, openTab, pairOf, type SdkWorld } 
 vi.mock('../../lib/token/verify', () => ({ verifyUrlTokens: async () => undefined }));
 
 const KEYS = { access: 'access', refresh: 'refresh', id: 'id_token', scopes: 'tokens_scopes' };
-const COOKIE_ID = 'passflow_id_token';
+const COOKIE_ID = 'passflow_id_token:test-app-id';
 
 let world: SdkWorld | undefined;
 const start = (answer?: Parameters<typeof createSdkWorld>[0]): SdkWorld => {
@@ -239,8 +239,8 @@ describe('what stays', () => {
     // its answer would write the session state into the shared storage.
     vi.spyOn(AuthAPI.prototype, 'validateSession').mockReturnValue(new Promise(() => {}));
     const id = idToken('cookie');
-    w.shared.items.set('passflow_delivery_mode', 'cookie');
-    w.shared.items.set('passflow_csrf_token', 'csrf');
+    w.shared.items.set('passflow_delivery_mode:test-app-id', 'cookie');
+    w.shared.items.set('passflow_csrf_token:test-app-id', 'csrf');
     w.shared.items.set(COOKIE_ID, id);
     const a = openTab(w, 'a', { cookiesSupported: vi.fn(() => true) });
     await w.ready();
@@ -250,8 +250,8 @@ describe('what stays', () => {
     await w.run();
 
     expect(Object.keys(w.snapshot())).toEqual(Object.keys(before));
-    expect(w.shared.items.get('passflow_delivery_mode')).toBe('cookie');
-    expect(w.shared.items.get('passflow_csrf_token')).toBe('csrf');
+    expect(w.shared.items.get('passflow_delivery_mode:test-app-id')).toBe('cookie');
+    expect(w.shared.items.get('passflow_csrf_token:test-app-id')).toBe('csrf');
     expect(w.shared.items.get(COOKIE_ID) === id).toBe(true);
 
     const next = idToken('cookie-next');

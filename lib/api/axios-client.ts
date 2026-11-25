@@ -617,6 +617,8 @@ export class AxiosClient {
    */
   setAppId(appId: string): void {
     this.appId = appId;
+    // The delivery mode is stored per app: cookie mode decides the CSRF header.
+    this.tokenDeliveryManager.reload();
 
     // Update default headers
     this.defaultHeaders = {

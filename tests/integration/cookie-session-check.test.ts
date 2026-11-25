@@ -46,6 +46,20 @@ describe('the cookie-mode session check on load', () => {
     expect(restored).toContainEqual(USER);
   });
 
+  test.each([
+    ['an HTML page', '<!doctype html><title>Sign in</title>'],
+    ['an object with no id', { status: 'ok' }],
+    ['an empty body', ''],
+  ])('a 200 that is not the user (%s) marks the session invalid', async (_name, body) => {
+    answerUserMe(() => Promise.resolve(body));
+    const sdk = new Passflow(TEST_CONFIG);
+
+    expect(await sdk.restoreSession()).toBe(false);
+
+    expect(localStorage.getItem(SESSION_KEY)).toBe('invalid');
+    expect(sdk.isAuthenticated()).toBe(false);
+  });
+
   test('a 401 marks the session invalid', async () => {
     answerUserMe(() =>
       Promise.reject(

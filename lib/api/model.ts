@@ -342,15 +342,12 @@ export type PassflowLogoutResponse = {
   status: 'ok';
 };
 
-export interface PassflowSessionValidationResponse {
-  valid: boolean;
-  user?: {
-    id: string;
-    email?: string;
-    username?: string;
-    [key: string]: unknown;
-  };
-  expires_at?: number;
+/** The signed-in user, as `GET /user/me` answers: the user object itself. */
+export interface PassflowSessionUser {
+  id: string;
+  email?: string;
+  username?: string;
+  [key: string]: unknown;
 }
 
 export type PassflowResponseError = {

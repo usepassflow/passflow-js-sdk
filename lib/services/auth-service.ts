@@ -326,23 +326,12 @@ export class AuthService {
     }
 
     try {
-      // Call lightweight endpoint to validate session
-      // This uses the HttpOnly cookies automatically
-      const response = await this.authApi.validateSession();
-
-      if (response.valid) {
-        this.tokenDeliveryManager.setSessionValid();
-
-        // If response includes user info, emit event
-        if (response.user) {
-          this.subscribeStore.notify(PassflowEvent.SessionRestored, response.user);
-        }
-
-        return true;
-      } else {
-        this.tokenDeliveryManager.setSessionInvalid();
-        return false;
-      }
+      // The HttpOnly cookies go with the request. An answer at all means the session is valid,
+      // and its body is the user.
+      const user = await this.authApi.validateSession();
+      this.tokenDeliveryManager.setSessionValid();
+      if (user?.id) this.subscribeStore.notify(PassflowEvent.SessionRestored, user);
+      return true;
     } catch (_error) {
       // Session invalid or network error
       this.tokenDeliveryManager.setSessionInvalid();

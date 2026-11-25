@@ -408,6 +408,10 @@ export class Passflow {
     this.upgradeApi.setAppId(appId);
 
     this.authService.setAppId(appId);
+
+    // The cached tokens were the previous app's: the cache now holds what is stored for this one.
+    this.tokenCacheService.setTokensCache(undefined);
+    this.setTokensToCacheFromLocalStorage();
   }
 
   /**

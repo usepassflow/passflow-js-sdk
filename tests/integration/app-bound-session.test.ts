@@ -208,6 +208,27 @@ describe('the delivery mode, CSRF token and cookie-mode id token of two apps on 
     expect(sdk.isAuthenticated()).toBe(true);
   });
 
+  test("setAppId to B loads B's stored tokens into the token cache", () => {
+    const stored = storeCookieSession('app-b');
+    const sdk = new Passflow(TEST_CONFIG);
+    expect(sdk.getCachedTokens()).toBeUndefined();
+
+    sdk.setAppId('app-b');
+
+    expect(sdk.getCachedTokens()).toEqual({ id_token: stored.passflow_id_token });
+  });
+
+  test('setAppId to an app with nothing stored empties the token cache', () => {
+    const sdk = new Passflow(TEST_CONFIG);
+    sdk.setTokens(VALID_TOKENS);
+    expect(sdk.getCachedTokens()?.access_token).toBe(VALID_TOKENS.access_token);
+
+    sdk.setAppId('another-app');
+
+    expect(sdk.getCachedTokens()).toBeUndefined();
+    expect(localStorage.getItem('access')).toBe(VALID_TOKENS.access_token);
+  });
+
   test("setAppId to B puts the HTTP client in B's delivery mode", () => {
     storeCookieSession('app-b');
     const sdk = new Passflow(TEST_CONFIG);

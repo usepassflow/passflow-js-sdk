@@ -2,6 +2,16 @@
 
 ## Changelog
 
+### Version 0.35.3
+
+- Fixed: in cookie and BFF mode a call answered 401 refreshes the session once and is sent once
+  more, so an expired access cookie with a good refresh cookie no longer fails the call or marks
+  the session invalid. Calls answered 401 together share one refresh. When the refresh fails, the
+  session has ended, or the second send is also answered 401, the call rejects with the 401 and
+  the session is marked invalid, as before. `/auth/refresh`, logout, the sign-in calls, the hosted
+  session's calls, calls made with their own bearer and step-up 401s are not sent again. This
+  needs a Passflow server that answers 401 for a missing or expired access token.
+
 ### Version 0.35.2
 
 - Fixed: the cookie and BFF session is stored per app. The session state, delivery mode, CSRF token

@@ -12,6 +12,7 @@ Every refresh in a `Passflow` instance goes through one refresh controller. Four
 | `passflow.getTokens(true)`, `session({ doRefresh: true })` | `session` |
 | `passflow.getTokensWithRefresh()` | `token-check` |
 | An SDK API call whose access token expires within 30 s (JSON mode) | `pre-request` |
+| An SDK API call answered 401 (cookie and BFF modes) | `pre-request` |
 | The step-up (upgrade) commit | `upgrade` |
 | The scheduled retry, when no new caller asked | `retry` |
 | The held-tab send (see "Held tab") | `held` |
@@ -391,6 +392,13 @@ check on the answer's id token `sub`.
 - A transient failure no longer marks the session invalid. Only the end does (the last strike, or
   the successor timeout): then the session is marked invalid, the local id token and CSRF token
   are cleared, and `SessionExpired` follows.
+- The access cookie cannot be read, so there is no refresh before a call. Its expiry shows as a
+  401 on the call: the API client then asks the controller for one refresh and sends the call once
+  more. Calls answered 401 while that refresh is pending share it. When the refresh fails or the
+  session has ended, or the second send is also answered 401, the call rejects with the 401 and the
+  session is marked invalid. This does not apply to `/auth/refresh`, logout, the sign-in calls
+  under `/auth/`, the hosted session's calls, a call made with its own bearer, or a 401 that
+  belongs to a step-up.
 - Cookie mode sends `AuthAPI.refreshToken('', scopes)`; the server reads the HttpOnly cookie.
 - BFF mode (`tokenExchange.refreshUrl`) sends `POST refreshUrl` with `credentials: 'include'`. A
   non-OK answer becomes a `PassflowError` with the HTTP status and the body's `error.id` (or

@@ -586,7 +586,7 @@ describe('REQ-6: Refresh in cookie and BFF mode (PFL-792)', () => {
     const start = (answer: Parameters<typeof createSdkWorld>[0]) => {
       const w = createSdkWorld(answer);
       world = w;
-      vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ valid: true } as never);
+      vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ id: 'user-1' });
       seedSession(w, 'cookie');
       return w;
     };
@@ -677,7 +677,7 @@ describe('REQ-6: Refresh in cookie and BFF mode (PFL-792)', () => {
     test('a session already marked invalid by a 401: getTokens(true) during an outage resolves with the kept id token', async () => {
       const w = start(() => ({ error: outage() }));
       w.shared.view('seed').setItem(SESSION_KEY, 'invalid');
-      vi.spyOn(AuthAPI.prototype, 'validateSession').mockResolvedValue({ valid: false } as never);
+      vi.spyOn(AuthAPI.prototype, 'validateSession').mockRejectedValue(httpError('error.unauthorized', 401));
       const a = w.open('a', {}, COOKIES);
       await w.ready();
       const idBefore = w.shared.items.get(ID_KEY);

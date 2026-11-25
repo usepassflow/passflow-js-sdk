@@ -7,8 +7,71 @@
 - Fixed: the cookie and BFF session state is stored per app, under
   `passflow_session_state:<appId>`, so two apps on one origin no longer change each other's state.
   With no app id the key is unchanged. A state stored by an earlier version under the plain key is
-  not read once an app id is set, and the session is checked again as on a first load.
-  `setAppId()` reads the state of the new app.
+  not read once an app id is set. Cookie mode, and BFF mode with a `statusUrl`, check the session
+  again on load. BFF mode with no `statusUrl` has no check on load, so a session stored as invalid
+  under the plain key reads as signed in until the next 401. `setAppId()` reads the state of the new
+  app.
+- Fixed: in cookie mode the session check on load (`GET /user/me`) takes any 2xx answer as a valid
+  session and passes the user in the answer to `SessionRestored`. It looked for a `valid` field the
+  server does not send, so every load marked a good session invalid and `isAuthenticated()` returned
+  false. A 401, any other error or a network failure still marks the session invalid.
+  `PassflowSessionValidationResponse` is replaced by `PassflowSessionUser`, the user object.
+
+### Version 0.35.1
+
+- Fixed: a federated start that answers with an `auth_url` (a `human_only` app, or the `agentTool`
+  option) is followed only when the address is `http` or `https`. Any other address fails the start
+  with an `Error` whose operation is `federated.redirect` or `federated.popup`, and a pending popup
+  is closed.
+
+### Version 0.35.0
+
+- Fixed: a session with an access token and no refresh token stays signed in when the page becomes
+  visible again and when another tab signs the same user in. It ends when its access token is gone
+  from storage, when the user signs out, or when another user signs in.
+- Changed: a new session (a sign-in, tokens in the URL, `setTokens()`) replaces the stored one. A
+  call to `setTokens()` with only a new access token drops the stored refresh token, ID token and
+  scopes. Pass every token you want to keep; read the current ones with `getTokens()` or
+  `getCachedTokens()`.
+- A tab that holds a refresh token gets `SignOut` with origin `other-tab` after 2 s when another tab
+  replaces the session with one that has no refresh token.
+- `getTokens(true)` and `session({ doRefresh: true })` resolve `undefined` for an expired access
+  token with no refresh token, so `expiredSession` is called.
+
+### Version 0.34.0
+
+- App settings carry `bot_mode` and `anti_bot`. On a `human_only` app the SDK adds
+  `X-Passflow-Anti-Bot` to the covered sign-in calls: login, register, passwordless start, passkey
+  register and authenticate start, password reset send and federated start. The value is a built-in
+  proof of work, solved in `dist/anti-bot-worker.js` (`antiBotWorkerUrl`) or on the main thread, or
+  a token from `setAntiBotTokenProvider()`. A `bot_friendly` app, or an unknown bot mode, sends the
+  same requests as before. See [docs/anti-bot.md](docs/anti-bot.md).
+- `antiBotToken()` gives the header value for calls the SDK does not make itself. The per-call
+  `agentTool` option sends `X-Passflow-Agent-Tool: 1`. New events: `anti-bot:solving` and
+  `anti-bot:solved`.
+- A challenge whose `max` is above 5,000,000 is refused, and a solve still running after 60 s is
+  stopped. Both reject with `error.anti_bot.solve_failed`.
+- Fixed: `federatedAuthWithPopup` opens the popup inside the click, before any request, and fills in
+  the address afterwards, so a slow settings read no longer gets the popup blocked.
+
+### Version 0.33.0
+
+- `listSessions()` lists the signed-in user's sessions; the caller's own has `current: true`.
+  `revokeSession(sessionId)` ends one; ending the session this instance is signed in with signs out
+  like `logOut()`. `signOutOtherSessions()` ends every other session and resolves to `{ revoked }`.
+- New types: `PassflowUserSession`, `PassflowSessionDevice`, `PassflowUserSessionList` and
+  `PassflowRevokeOtherSessionsResponse`. Errors carry the operation `session.list`,
+  `session.revoke` or `session.revoke-others`.
+
+### Version 0.32.1
+
+- Fixed: `new Passflow()` no longer reads or creates the device id in constructors; the first
+  request does. Constructing the SDK during a server render no longer calls `crypto.randomUUID()`.
+- Fixed: the device id, scopes, invitation token and previous redirect URL keys honour
+  `keyStoragePrefix`. A value stored under the old unprefixed key is still used, and moved to the
+  prefixed key on first read. With no prefix nothing changes.
+- Fixed: with storage that keeps nothing, one `Passflow` instance sends one device id instead of a
+  new one per request. An empty stored scope list is kept as empty.
 
 ### Version 0.32.0
 

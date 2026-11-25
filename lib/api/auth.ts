@@ -40,7 +40,7 @@ import {
   PassflowPasswordlessStatusResponse,
   PassflowResponseError,
   PassflowSendPasswordResetEmailPayload,
-  PassflowSessionValidationResponse,
+  PassflowSessionUser,
   PassflowSignInExtendedPayload,
   PassflowSignInPayload,
   PassflowSignUpPayload,
@@ -415,8 +415,9 @@ export class AuthAPI {
     return this.axiosClient.post<PassflowLogoutResponse, typeof payload>(endpoint, payload);
   }
 
-  validateSession(): Promise<PassflowSessionValidationResponse> {
-    return this.axiosClient.get<PassflowSessionValidationResponse>(PassflowEndpointPaths.validateSession);
+  /** Reads the signed-in user. Any 2xx means the session is valid; an invalid session rejects. */
+  validateSession(): Promise<PassflowSessionUser> {
+    return this.axiosClient.get<PassflowSessionUser>(PassflowEndpointPaths.validateSession);
   }
 
   sendPasswordResetEmail(

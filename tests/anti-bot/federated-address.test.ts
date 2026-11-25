@@ -6,7 +6,17 @@ import { PassflowEvent } from '../../lib/index';
 import { federatedPayload, HUMAN_BUILTIN, harness, until } from './harness';
 
 const START = '/auth/federated/start/google';
-const REFUSED = ['javascript:alert(1)', ' JavaScript:alert(1)', 'data:text/html,<p>x</p>', 'vbscript:x', 'not a url', ''];
+const REFUSED = [
+  'javascript:alert(1)',
+  ' JavaScript:alert(1)',
+  'data:text/html,<p>x</p>',
+  'vbscript:x',
+  'not a url',
+  '',
+  'https://',
+  'httpx://a',
+  'https-evil:x',
+];
 
 describe('federated start address', () => {
   test.each(REFUSED)('redirect refuses %j: no navigation, one federated.redirect error', async (address) => {
@@ -50,7 +60,7 @@ describe('federated start address', () => {
     expect(rejected).toBeInstanceOf(Error);
   });
 
-  test.each(['https://accounts.example/authorize?x=1', 'http://localhost:8080/authorize'])(
+  test.each(['https://accounts.example/authorize?x=1', 'http://localhost:8080/authorize', 'HTTPS://A.example/x'])(
     'redirect follows %s',
     async (address) => {
       const h = harness(HUMAN_BUILTIN);

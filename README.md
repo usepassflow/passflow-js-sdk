@@ -2,6 +2,14 @@
 
 ## Changelog
 
+### Version 0.35.2
+
+- Fixed: the cookie and BFF session state is stored per app, under
+  `passflow_session_state:<appId>`, so two apps on one origin no longer change each other's state.
+  With no app id the key is unchanged. A state stored by an earlier version under the plain key is
+  not read once an app id is set, and the session is checked again as on a first load.
+  `setAppId()` reads the state of the new app.
+
 ### Version 0.32.0
 
 - `passflow.withAuth(fetch, { origins })`, `passflow.attachAuth(axios, { origins })` and
@@ -83,7 +91,7 @@ Matches the SDK to the server's real two-factor, step-up and sign-out answers.
   `sign_in_required: true` first. After the fresh sign-in, the level refusal follows as
   `UpgradeUnsatisfiableError`, so that sign-in cannot help.
 - A cookie or BFF session that stores no ID token makes another app's session undetectable, so this
-  app's `logOut()` clears the shared delivery mode and session state. It fails safe: the other app is
+  app's `logOut()` clears the shared delivery mode. It fails safe: the other app is
   signed out, never wrongly signed in.
 
 ### Version 0.30.1

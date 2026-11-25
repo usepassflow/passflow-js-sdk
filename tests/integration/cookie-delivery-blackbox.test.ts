@@ -552,7 +552,7 @@ describe('Cookie Delivery Support - Black Box Tests', () => {
  */
 describe('REQ-6: Refresh in cookie and BFF mode (PFL-792)', () => {
   let world: SdkWorld | undefined;
-  const SESSION_KEY = 'passflow_session_state';
+  const SESSION_KEY = 'passflow_session_state:test-app-id';
   const ID_KEY = 'passflow_id_token';
   const CSRF_KEY = 'passflow_csrf_token';
   let issued = 0;

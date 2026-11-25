@@ -43,6 +43,21 @@ export class TokenDeliveryManager {
   }
 
   /**
+   * The storage key of the session state: one key per app (`passflow_session_state:<appId>`), so
+   * apps on one origin keep separate states. With no app id, the plain key.
+   */
+  private sessionStateKey(): string {
+    const appId = this.storageManager.getAppId();
+    return appId ? `${this.SESSION_STATE_KEY}:${appId}` : this.SESSION_STATE_KEY;
+  }
+
+  /** Reads the session state again, for when the app id changes: the state is the new app's. */
+  reloadSessionState(): void {
+    this.sessionState = SessionState.Unknown;
+    this.loadPersistedSessionState();
+  }
+
+  /**
    * Set the token delivery mode
    */
   setMode(mode: TokenDeliveryMode): void {
@@ -146,16 +161,16 @@ export class TokenDeliveryManager {
   }
 
   /**
-   * Reset delivery manager to initial state. With `keepStored`, only the in-memory state is reset:
-   * the stored mode and session state belong to another app's session and stay.
+   * Reset delivery manager to initial state. With `keepStored`, the stored mode stays: every app on
+   * the origin shares it, and it belongs to another app's session.
    */
   reset(keepStored = false): void {
     this.mode = TokenDeliveryMode.JsonBody;
     this.sessionState = SessionState.Unknown;
     this.isInitializedFlag = false;
+    this.clearPersistedSessionState();
     if (keepStored) return;
     this.clearPersistedMode();
-    this.clearPersistedSessionState();
   }
 
   /**
@@ -181,7 +196,7 @@ export class TokenDeliveryManager {
    */
   private loadPersistedSessionState(): void {
     try {
-      const persistedState = this.storageManager['storage'].getItem(this.SESSION_STATE_KEY);
+      const persistedState = this.storageManager['storage'].getItem(this.sessionStateKey());
       if (persistedState) {
         // Validate that the persisted state is a valid enum value
         if (Object.values(SessionState).includes(persistedState as SessionState)) {
@@ -209,7 +224,7 @@ export class TokenDeliveryManager {
    */
   private persistSessionState(): void {
     try {
-      this.storageManager['storage'].setItem(this.SESSION_STATE_KEY, this.sessionState);
+      this.storageManager['storage'].setItem(this.sessionStateKey(), this.sessionState);
     } catch (_error) {
       // Silently ignore storage errors during persist
     }
@@ -231,7 +246,7 @@ export class TokenDeliveryManager {
    */
   private clearPersistedSessionState(): void {
     try {
-      this.storageManager['storage'].removeItem(this.SESSION_STATE_KEY);
+      this.storageManager['storage'].removeItem(this.sessionStateKey());
     } catch (_error) {
       // Silently ignore storage errors during clear
     }

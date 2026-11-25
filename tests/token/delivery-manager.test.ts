@@ -298,18 +298,18 @@ describe('TokenDeliveryManager', () => {
       expect(fakeStorage.getItem('passflow_session_state:app-b')).toBe(SessionState.Invalid);
     });
 
-    test('reloadSessionState reads the state of the app the storage now names', () => {
+    test('reload reads the state of the app the storage now names', () => {
       managerOf('app-b').setSessionInvalid();
       const appStorage = new StorageManager({ storage: fakeStorage, appId: 'app-a' });
       const manager = new TokenDeliveryManager(appStorage);
       manager.setSessionValid();
 
       appStorage.setAppId('app-b');
-      manager.reloadSessionState();
+      manager.reload();
       expect(manager.getSessionState()).toBe(SessionState.Invalid);
 
       appStorage.setAppId('app-c');
-      manager.reloadSessionState();
+      manager.reload();
       expect(manager.getSessionState()).toBe(SessionState.Unknown);
       expect(fakeStorage.getItem('passflow_session_state:app-a')).toBe(SessionState.Valid);
     });

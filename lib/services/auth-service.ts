@@ -237,11 +237,7 @@ export class AuthService {
   ) {
     this.tokenExchangeConfig = tokenExchangeConfig;
     this.tokenDeliveryManager = new TokenDeliveryManager(storageManager);
-
-    // If token exchange is enabled, set BFF mode immediately
-    if (tokenExchangeConfig?.enabled) {
-      this.tokenDeliveryManager.setMode(TokenDeliveryMode.BFF);
-    }
+    this.setBffModeIfConfigured();
 
     // The controller reads the identity from the cache or storage now. It subscribes to nothing
     // in the store: every new session calls `sessionStarted()` directly (amendment A1).
@@ -263,7 +259,14 @@ export class AuthService {
   /** The app id used for `client_id`, the override check, federated starts and landings. */
   setAppId(appId: string): void {
     this.appId = appId;
-    this.tokenDeliveryManager.reloadSessionState();
+    // The delivery mode and session state are stored per app.
+    this.tokenDeliveryManager.reload();
+    this.setBffModeIfConfigured();
+  }
+
+  /** With token exchange enabled the mode is BFF from the start, before any server answer. */
+  private setBffModeIfConfigured(): void {
+    if (this.tokenExchangeConfig?.enabled) this.tokenDeliveryManager.setMode(TokenDeliveryMode.BFF);
   }
 
   /**
@@ -326,11 +329,15 @@ export class AuthService {
     }
 
     try {
-      // The HttpOnly cookies go with the request. An answer at all means the session is valid,
-      // and its body is the user.
+      // The HttpOnly cookies go with the request. A valid session answers with the user; a 2xx
+      // with anything else (a proxy's page, a followed redirect) is not one.
       const user = await this.authApi.validateSession();
+      if (!user?.id) {
+        this.tokenDeliveryManager.setSessionInvalid();
+        return false;
+      }
       this.tokenDeliveryManager.setSessionValid();
-      if (user?.id) this.subscribeStore.notify(PassflowEvent.SessionRestored, user);
+      this.subscribeStore.notify(PassflowEvent.SessionRestored, user);
       return true;
     } catch (_error) {
       // Session invalid or network error
@@ -1299,13 +1306,8 @@ export class AuthService {
 
   /** Deletes every local trace of the session (both delivery modes) and clears the token cache. */
   private clearLocalSession(): void {
-    // Decided before anything is removed: another app's session alone keeps the delivery mode all
-    // apps on the origin share.
-    const otherAppSession = this.storageManager.holdsOnlyOtherAppSession();
     this.storageManager.deleteTokens();
-    this.storageManager.clearIdToken();
-    this.storageManager.clearCsrfToken();
-    this.tokenDeliveryManager.reset(otherAppSession);
+    this.tokenDeliveryManager.reset();
     this.tokenCacheService.setTokensCache(undefined);
     this.tokenCacheService.stopTokenCheck?.();
   }

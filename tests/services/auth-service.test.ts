@@ -149,6 +149,10 @@ describe('AuthService', () => {
       getDeviceId: vi.fn().mockReturnValue(mockDeviceId),
       clearIdToken: vi.fn(),
       clearCsrfToken: vi.fn(),
+      appKey: vi.fn((name: string) => name),
+      getDeliveryMode: vi.fn().mockReturnValue(undefined),
+      setDeliveryMode: vi.fn(),
+      clearDeliveryMode: vi.fn(),
     };
 
     // Mock token service functions directly
@@ -296,8 +300,6 @@ describe('AuthService', () => {
       await authService.logOut();
 
       expect(mockStorageManager.deleteTokens).toHaveBeenCalled();
-      expect(mockStorageManager.clearIdToken).toHaveBeenCalled();
-      expect(mockStorageManager.clearCsrfToken).toHaveBeenCalled();
       expect(mockTokenCacheService.setTokensCache).toHaveBeenCalledWith(undefined);
       expect(mockSubscribeStore.notify).not.toHaveBeenCalledWith(PassflowEvent.SignOut, expect.anything());
     });
@@ -547,8 +549,6 @@ describe('AuthService', () => {
       await authService.logOut();
 
       expect(mockStorageManager.deleteTokens).toHaveBeenCalled();
-      expect(mockStorageManager.clearIdToken).toHaveBeenCalled();
-      expect(mockStorageManager.clearCsrfToken).toHaveBeenCalled();
     });
   });
 

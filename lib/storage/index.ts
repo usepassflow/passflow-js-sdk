@@ -40,9 +40,6 @@ export class StorageManager {
 
   // Namespaced keys for cookie mode support
   private readonly STORAGE_PREFIX = 'passflow_';
-  private readonly ID_TOKEN_KEY = `${this.STORAGE_PREFIX}id_token`;
-  private readonly CSRF_TOKEN_KEY = `${this.STORAGE_PREFIX}csrf_token`;
-  private readonly DELIVERY_MODE_KEY = `${this.STORAGE_PREFIX}delivery_mode`;
 
   private storage: Storage;
   private appId: string | undefined;
@@ -69,6 +66,27 @@ export class StorageManager {
   /** The app id set at construction or by `setAppId()`, or undefined when there is none. */
   getAppId(): string | undefined {
     return this.appId;
+  }
+
+  /**
+   * The storage key of a value each app keeps for itself: `name:<appId>`, so apps on one origin do
+   * not read or remove each other's. With no app id, `name`. Worked out at each use, so it follows
+   * `setAppId()`.
+   */
+  appKey(name: string): string {
+    return this.appId ? `${name}:${this.appId}` : name;
+  }
+
+  private idTokenKey(): string {
+    return this.appKey(`${this.STORAGE_PREFIX}id_token`);
+  }
+
+  private csrfTokenKey(): string {
+    return this.appKey(`${this.STORAGE_PREFIX}csrf_token`);
+  }
+
+  private deliveryModeKey(): string {
+    return this.appKey(`${this.STORAGE_PREFIX}delivery_mode`);
   }
 
   /** The stored value, or undefined when it is a JWT issued for another app than this one. */
@@ -118,7 +136,7 @@ export class StorageManager {
       this.getKeyForTokenType(TokenType.access_token),
       this.getKeyForTokenType(TokenType.refresh_token),
       this.getKeyForTokenType(TokenType.id_token),
-      this.ID_TOKEN_KEY,
+      this.idTokenKey(),
     ];
   }
 
@@ -131,8 +149,8 @@ export class StorageManager {
 
   /**
    * Whether the stored session is only another app's: some key holds another app's token and none
-   * holds this app's. The keys every session shares (scopes, delivery mode, CSRF token) are then
-   * that app's, and this instance's clearing leaves them in place.
+   * holds this app's. The scopes, which every session shares, are then that app's, and this
+   * instance's clearing leaves them in place.
    */
   holdsOnlyOtherAppSession(): boolean {
     if (!this.appId) return false;
@@ -161,7 +179,7 @@ export class StorageManager {
     if (deliveryMode === TokenDeliveryMode.Cookie || deliveryMode === TokenDeliveryMode.BFF) {
       // Cookie/BFF mode: ONLY save ID token (access/refresh in HttpOnly cookies)
       if (id_token) {
-        this.storage.setItem(this.ID_TOKEN_KEY, id_token);
+        this.storage.setItem(this.idTokenKey(), id_token);
       }
       // Do NOT save access_token or refresh_token in localStorage
     } else {
@@ -194,7 +212,7 @@ export class StorageManager {
 
     if (mode === TokenDeliveryMode.Cookie || mode === TokenDeliveryMode.BFF) {
       // Cookie/BFF mode: return ID token only (access/refresh in HttpOnly cookies)
-      const idToken = this.readToken(this.ID_TOKEN_KEY);
+      const idToken = this.readToken(this.idTokenKey());
       if (!idToken) return undefined;
       return {
         id_token: idToken,
@@ -230,7 +248,7 @@ export class StorageManager {
    * Used to detect legitimate cookie/BFF mode sessions
    */
   hasCookieModeIdToken(): boolean {
-    return !!this.readToken(this.ID_TOKEN_KEY);
+    return !!this.readToken(this.idTokenKey());
   }
 
   deleteToken(tokenType: TokenType): void {
@@ -240,22 +258,20 @@ export class StorageManager {
 
   /**
    * Clears this app's stored session, key by key: a key holding another app's token stays. The
-   * keys every session shares (scopes, delivery mode, CSRF token) stay only when the stored session
-   * is another app's alone, and the hosted sign-in record only when another app wrote it.
+   * scopes, which every session shares, stay only when the stored session is another app's alone,
+   * and the hosted sign-in record only when another app wrote it.
    */
   deleteTokens(): void {
     // Decided before anything is removed: afterwards none of this app's tokens is left to tell.
-    const keepShared = this.holdsOnlyOtherAppSession();
+    const keepScopes = this.holdsOnlyOtherAppSession();
 
     // Clear JSON mode tokens and the cookie mode ID token
     for (const key of this.tokenValueKeys()) this.removeOwnToken(key);
 
-    if (!keepShared) {
-      // Clear scopes, delivery mode and CSRF token to ensure clean state for next session
-      this.removePrefixed(this.scopes, SCOPES_KEY);
-      this.clearDeliveryMode();
-      this.removeCsrfToken();
-    }
+    if (!keepScopes) this.removePrefixed(this.scopes, SCOPES_KEY);
+    // The delivery mode and CSRF token are this app's own.
+    this.clearDeliveryMode();
+    this.clearCsrfToken();
     if (!this.appId || this.getHostedSignIn() !== undefined || !this.storage.getItem(this.hostedSignInKey())) {
       this.storage.removeItem(this.hostedSignInKey());
     }
@@ -330,7 +346,7 @@ export class StorageManager {
    */
   setDeliveryMode(mode: TokenDeliveryMode): void {
     try {
-      this.storage.setItem(this.DELIVERY_MODE_KEY, mode);
+      this.storage.setItem(this.deliveryModeKey(), mode);
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -341,7 +357,7 @@ export class StorageManager {
    */
   getDeliveryMode(): TokenDeliveryMode | undefined {
     try {
-      const mode = this.storage.getItem(this.DELIVERY_MODE_KEY);
+      const mode = this.storage.getItem(this.deliveryModeKey());
       if (mode && Object.values(TokenDeliveryMode).includes(mode as TokenDeliveryMode)) {
         return mode as TokenDeliveryMode;
       }
@@ -356,7 +372,7 @@ export class StorageManager {
    */
   clearDeliveryMode(): void {
     try {
-      this.storage.removeItem(this.DELIVERY_MODE_KEY);
+      this.storage.removeItem(this.deliveryModeKey());
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -369,7 +385,7 @@ export class StorageManager {
    */
   getIdToken(): string | undefined {
     try {
-      return this.readToken(this.ID_TOKEN_KEY);
+      return this.readToken(this.idTokenKey());
     } catch (_error) {
       // Silently ignore storage errors
       return undefined;
@@ -381,7 +397,7 @@ export class StorageManager {
    */
   setIdToken(token: string): void {
     try {
-      this.storage.setItem(this.ID_TOKEN_KEY, token);
+      this.storage.setItem(this.idTokenKey(), token);
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -392,7 +408,7 @@ export class StorageManager {
    */
   clearIdToken(): void {
     try {
-      this.removeOwnToken(this.ID_TOKEN_KEY);
+      this.removeOwnToken(this.idTokenKey());
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -405,7 +421,7 @@ export class StorageManager {
    */
   getCsrfToken(): string | undefined {
     try {
-      return this.storage.getItem(this.CSRF_TOKEN_KEY) ?? undefined;
+      return this.storage.getItem(this.csrfTokenKey()) ?? undefined;
     } catch (_error) {
       // Silently ignore storage errors
       return undefined;
@@ -417,7 +433,7 @@ export class StorageManager {
    */
   setCsrfToken(token: string): void {
     try {
-      this.storage.setItem(this.CSRF_TOKEN_KEY, token);
+      this.storage.setItem(this.csrfTokenKey(), token);
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -427,14 +443,8 @@ export class StorageManager {
    * Clear the CSRF token from storage
    */
   clearCsrfToken(): void {
-    // Another app's session alone in storage: the CSRF token is that app's.
-    if (this.holdsOnlyOtherAppSession()) return;
-    this.removeCsrfToken();
-  }
-
-  private removeCsrfToken(): void {
     try {
-      this.storage.removeItem(this.CSRF_TOKEN_KEY);
+      this.storage.removeItem(this.csrfTokenKey());
     } catch (_error) {
       // Silently ignore storage errors
     }
@@ -451,9 +461,9 @@ export class StorageManager {
       this.getKeyForTokenType(TokenType.access_token),
       this.getKeyForTokenType(TokenType.refresh_token),
       this.scopes,
-      this.ID_TOKEN_KEY,
-      this.CSRF_TOKEN_KEY,
-      this.DELIVERY_MODE_KEY,
+      this.idTokenKey(),
+      this.csrfTokenKey(),
+      this.deliveryModeKey(),
     ];
   }
 

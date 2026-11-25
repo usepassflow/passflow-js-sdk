@@ -35,6 +35,10 @@ vi.mock('../../lib/storage', () => ({
     return {
       getTokens: () => null,
       getScopes: () => [],
+      appKey: (name: string) => name,
+      getDeliveryMode: () => mockStorageGetItem('passflow_delivery_mode') ?? undefined,
+      setDeliveryMode: () => {},
+      clearDeliveryMode: () => {},
       storage: {
         getItem: (key: string) => mockStorageGetItem(key),
         setItem: () => {},

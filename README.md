@@ -4,18 +4,20 @@
 
 ### Version 0.35.2
 
-- Fixed: the cookie and BFF session state is stored per app, under
-  `passflow_session_state:<appId>`, so two apps on one origin no longer change each other's state.
-  With no app id the key is unchanged. A state stored by an earlier version under the plain key is
-  not read once an app id is set. Cookie mode, and BFF mode with a `statusUrl`, check the session
-  again on load. BFF mode with no `statusUrl` has no check on load, so a session stored as invalid
-  under the plain key reads as signed in until the next 401. `setAppId()` reads the state of the new
-  app.
-- Fixed: in cookie mode the session check on load (`GET /user/me`) takes any 2xx answer as a valid
-  session and passes the user in the answer to `SessionRestored`. It looked for a `valid` field the
-  server does not send, so every load marked a good session invalid and `isAuthenticated()` returned
-  false. A 401, any other error or a network failure still marks the session invalid.
-  `PassflowSessionValidationResponse` is replaced by `PassflowSessionUser`, the user object.
+- Fixed: the cookie and BFF session is stored per app. The session state, delivery mode, CSRF token
+  and cookie-mode ID token are kept under `passflow_session_state:<appId>`,
+  `passflow_delivery_mode:<appId>`, `passflow_csrf_token:<appId>` and `passflow_id_token:<appId>`,
+  so two apps on one origin no longer change each other's session: one app's sign-in, sign-out or
+  delivery mode leaves the other's alone. With no app id the keys are unchanged. Values stored by
+  an earlier version under the plain keys are not read once an app id is set. After updating, users
+  of an app that sets an app id and uses cookie or BFF delivery sign in once again. `setAppId()`
+  reads the delivery mode and session state of the new app.
+- Fixed: in cookie mode the session check on load (`GET /user/me`) takes a 2xx answer that holds the
+  user (an object with an `id`) as a valid session and passes that user to `SessionRestored`. It
+  looked for a `valid` field the server does not send, so every load marked a good session invalid
+  and `isAuthenticated()` returned false. A 2xx with any other body, a 401, any other error or a
+  network failure marks the session invalid. `PassflowSessionValidationResponse` is replaced by
+  `PassflowSessionUser`, the user object.
 
 ### Version 0.35.1
 

@@ -33,27 +33,24 @@ export class TokenDeliveryManager {
   private sessionState: SessionState = SessionState.Unknown;
   private isInitializedFlag = false;
 
-  private readonly STORAGE_PREFIX = 'passflow_';
-  private readonly DELIVERY_MODE_KEY = `${this.STORAGE_PREFIX}delivery_mode`;
-  private readonly SESSION_STATE_KEY = `${this.STORAGE_PREFIX}session_state`;
+  private readonly SESSION_STATE_KEY = 'passflow_session_state';
 
   constructor(private storageManager: StorageManager) {
     this.loadPersistedMode();
     this.loadPersistedSessionState();
   }
 
-  /**
-   * The storage key of the session state: one key per app (`passflow_session_state:<appId>`), so
-   * apps on one origin keep separate states. With no app id, the plain key.
-   */
+  /** The session state's storage key: the app's own, like the delivery mode's. */
   private sessionStateKey(): string {
-    const appId = this.storageManager.getAppId();
-    return appId ? `${this.SESSION_STATE_KEY}:${appId}` : this.SESSION_STATE_KEY;
+    return this.storageManager.appKey(this.SESSION_STATE_KEY);
   }
 
-  /** Reads the session state again, for when the app id changes: the state is the new app's. */
-  reloadSessionState(): void {
+  /** Reads the mode and session state again, for when the app id changes: both are the new app's. */
+  reload(): void {
+    this.mode = TokenDeliveryMode.JsonBody;
+    this.isInitializedFlag = false;
     this.sessionState = SessionState.Unknown;
+    this.loadPersistedMode();
     this.loadPersistedSessionState();
   }
 
@@ -161,33 +158,25 @@ export class TokenDeliveryManager {
   }
 
   /**
-   * Reset delivery manager to initial state. With `keepStored`, the stored mode stays: every app on
-   * the origin shares it, and it belongs to another app's session.
+   * Reset delivery manager to initial state, removing this app's stored mode and session state.
    */
-  reset(keepStored = false): void {
+  reset(): void {
     this.mode = TokenDeliveryMode.JsonBody;
     this.sessionState = SessionState.Unknown;
     this.isInitializedFlag = false;
     this.clearPersistedSessionState();
-    if (keepStored) return;
-    this.clearPersistedMode();
+    this.storageManager.clearDeliveryMode();
   }
 
   /**
    * Load persisted delivery mode from storage
    */
   private loadPersistedMode(): void {
-    try {
-      const persistedMode = this.storageManager['storage'].getItem(this.DELIVERY_MODE_KEY);
-      if (persistedMode) {
-        // Validate that the persisted mode is a valid enum value
-        if (Object.values(TokenDeliveryMode).includes(persistedMode as TokenDeliveryMode)) {
-          this.mode = persistedMode as TokenDeliveryMode;
-          this.isInitializedFlag = true;
-        }
-      }
-    } catch (_error) {
-      // Silently ignore storage errors during load
+    // The stored value is checked against the known modes by the storage manager.
+    const persistedMode = this.storageManager.getDeliveryMode();
+    if (persistedMode) {
+      this.mode = persistedMode;
+      this.isInitializedFlag = true;
     }
   }
 
@@ -212,11 +201,7 @@ export class TokenDeliveryManager {
    * Persist delivery mode to storage
    */
   private persistMode(): void {
-    try {
-      this.storageManager['storage'].setItem(this.DELIVERY_MODE_KEY, this.mode);
-    } catch (_error) {
-      // Silently ignore storage errors during persist
-    }
+    this.storageManager.setDeliveryMode(this.mode);
   }
 
   /**
@@ -227,17 +212,6 @@ export class TokenDeliveryManager {
       this.storageManager['storage'].setItem(this.sessionStateKey(), this.sessionState);
     } catch (_error) {
       // Silently ignore storage errors during persist
-    }
-  }
-
-  /**
-   * Clear persisted delivery mode from storage
-   */
-  private clearPersistedMode(): void {
-    try {
-      this.storageManager['storage'].removeItem(this.DELIVERY_MODE_KEY);
-    } catch (_error) {
-      // Silently ignore storage errors during clear
     }
   }
 

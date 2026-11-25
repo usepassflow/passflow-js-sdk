@@ -51,7 +51,7 @@ describe('AuthService on a PKCE app', () => {
       false,
       'https://auth.example.com',
       {},
-      'app-1',
+      'test-app-id',
       undefined,
       createMockPlatform() as unknown as PlatformAdapter,
       readPkceEnabled,

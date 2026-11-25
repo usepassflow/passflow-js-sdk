@@ -258,10 +258,18 @@ export class AuthService {
 
   /** The app id used for `client_id`, the override check, federated starts and landings. */
   setAppId(appId: string): void {
+    const previous = this.appId;
+    if (appId === previous) return;
     this.appId = appId;
     // The delivery mode and session state are stored per app.
     this.tokenDeliveryManager.reload();
     this.setBffModeIfConfigured();
+    // The first app id names the app the instance worked for so far: what is on its way stays.
+    if (!previous) return;
+    // An answer still on its way was asked for the previous app: it is not applied to this one.
+    this.refresh.sessionStarted();
+    // The check that page load started was for the previous app: check this app's session.
+    this.initializeSession();
   }
 
   /** With token exchange enabled the mode is BFF from the start, before any server answer. */
@@ -300,6 +308,10 @@ export class AuthService {
     // The stored cookie or BFF session is another app's: nothing of this app's to check.
     if (this.storageManager.holdsOnlyOtherAppSession()) return false;
 
+    // An answer that arrives after a new session or another app id started is not this session's.
+    const generation = this.refresh.generation;
+    const superseded = () => this.refresh.generation !== generation;
+
     // BFF mode: validate session with BFF endpoint
     if (this.tokenDeliveryManager.isBFFMode() && this.tokenExchangeConfig?.statusUrl) {
       try {
@@ -308,8 +320,9 @@ export class AuthService {
           credentials: 'include', // Include httpOnly cookies
         });
 
+        const data = response.ok ? await response.json() : undefined;
+        if (superseded()) return false;
         if (response.ok) {
-          const data = await response.json();
           if (data.authenticated) {
             this.tokenDeliveryManager.setSessionValid();
             return true;
@@ -319,6 +332,7 @@ export class AuthService {
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
       } catch (_error) {
+        if (superseded()) return false;
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
       }
@@ -332,6 +346,7 @@ export class AuthService {
       // The HttpOnly cookies go with the request. A valid session answers with the user; a 2xx
       // with anything else (a proxy's page, a followed redirect) is not one.
       const user = await this.authApi.validateSession();
+      if (superseded()) return false;
       if (!user?.id) {
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
@@ -340,6 +355,7 @@ export class AuthService {
       this.subscribeStore.notify(PassflowEvent.SessionRestored, user);
       return true;
     } catch (_error) {
+      if (superseded()) return false;
       // Session invalid or network error
       this.tokenDeliveryManager.setSessionInvalid();
       return false;
@@ -372,6 +388,9 @@ export class AuthService {
     if (response.code && !response.access_token) {
       throw new Error('A PKCE authorization code was not exchanged, so there are no tokens to apply');
     }
+    if (this.issuedForAnotherApp(response)) {
+      throw new Error('The tokens were issued for another app than the current app id, so they are not applied');
+    }
 
     // BFF mode overrides server-returned delivery mode
     if (this.tokenExchangeConfig?.enabled) {
@@ -399,6 +418,21 @@ export class AuthService {
     if (response.csrf_token) {
       this.storageManager.setCsrfToken(response.csrf_token);
     }
+  }
+
+  /** Whether the answer's ID or access token names audiences that leave out the current app id. */
+  private issuedForAnotherApp(response: PassflowAuthorizationResponse): boolean {
+    if (!this.appId) return false;
+    const token = response.id_token ?? response.access_token;
+    if (!token) return false;
+    let aud: unknown;
+    try {
+      aud = parseToken(token).aud;
+    } catch {
+      return false;
+    }
+    if (aud === undefined) return false;
+    return !(Array.isArray(aud) ? aud : [aud]).includes(this.appId);
   }
 
   /** A registration that leaves the user signed in: `Register`, then `SignIn` with the same payload. */

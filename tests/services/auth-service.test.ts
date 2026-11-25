@@ -91,7 +91,7 @@ describe('AuthService', () => {
   };
 
   const mockParsedToken: Token = {
-    aud: ['test-audience'],
+    aud: [mockAppId],
     exp: Date.now() / 1000 + 3600,
     iat: Date.now() / 1000,
     iss: 'test-issuer',

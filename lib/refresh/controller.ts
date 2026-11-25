@@ -151,6 +151,8 @@ export interface RefreshController {
   signOutNow(cleanup: (newest?: string) => void): void;
   /** A new session in this tab (sign-in, register, setTokens): new generation, counters reset. */
   sessionStarted(): void;
+  /** Counts the sessions of this tab: an answer asked for under an earlier number is not applied. */
+  readonly generation: number;
   /** The `sub` this tab's session belongs to. */
   identity(): string | undefined;
   readonly coordinated: boolean;
@@ -1428,6 +1430,7 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
       sent = verdict.kind === 'send' ? verdict.sent : { refreshToken: token, order: orderOf(token) ?? { fp: token } };
     }
     const sentAt = now();
+    const sentGeneration = generation;
     emit('refresh:start', {});
     let result: PassflowAuthorizationResponse;
     try {
@@ -1445,6 +1448,12 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
       throw error;
     }
     if (!sent) {
+      // A new session or another app id since the send: the answer is not this session's.
+      if (sentGeneration !== generation) {
+        const error = new UpgradeCommitInterruptedError('superseded');
+        emitError('upgrade.commit', 'upgrade', error);
+        throw error;
+      }
       await transport.applyOpaque(result);
       cache.setTokensCache({ ...(storage.getTokens() ?? {}), ...tokensOf(result, undefined) });
       upgradeSucceeded(sentAt);
@@ -1570,6 +1579,9 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
     signOutNow,
     sessionStarted,
     identity,
+    get generation() {
+      return generation;
+    },
     get coordinated() {
       return port.coordinated;
     },

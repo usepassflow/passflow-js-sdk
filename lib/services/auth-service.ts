@@ -134,6 +134,20 @@ const PASSWORDLESS_POLL_INTERVAL_MS = 3000;
 const FEDERATED_SLOT_STORAGE_KEY = 'passflow_federated_pkce';
 const FEDERATED_SLOT_TIMEOUT_MS = 10 * 60 * 1000;
 const FEDERATED_APP_ID_MESSAGE = 'AppId is required for federated auth';
+
+/** The `auth_url` of a POST federated start, refused unless it is an http or https address. */
+function federatedStartAddress(authUrl: string): string {
+  let protocol: string | undefined;
+  try {
+    protocol = new URL(authUrl).protocol;
+  } catch {
+    protocol = undefined;
+  }
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    throw new Error('The federated start returned an address that is not http or https');
+  }
+  return authUrl;
+}
 /** At most this many code challenges are remembered; each resend adds one. The oldest goes first. */
 const MAX_EMAIL_CHALLENGES = 10;
 const VERIFIER_GONE_MESSAGE = 'The sign-in answered with a PKCE code, but its verifier is gone';
@@ -1812,7 +1826,9 @@ export class AuthService {
           ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
         };
         const url = (await this.usesFederatedPost(options))
-          ? (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url
+          ? federatedStartAddress(
+              (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url,
+            )
           : this.createFederatedAuthUrl(start);
         return { url, pkce };
       })();
@@ -1920,7 +1936,9 @@ export class AuthService {
           ...(pkce ? { code_challenge: pkce.challenge, code_challenge_method: 'S256' as const } : {}),
         };
         const passflowURL = (await this.usesFederatedPost(options))
-          ? (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url
+          ? federatedStartAddress(
+              (await this.authApi.federatedStart(payload.provider, this.federatedStartBody(start, sscopes), options)).auth_url,
+            )
           : this.createFederatedAuthUrl(start);
         if (pkce) {
           this.rememberFederatedSlot(pkce.verifier, sscopes);

@@ -16,6 +16,8 @@
   so those calls went out without them until the next page load.
 - Fixed: `setAppId()` reloads the in-memory token cache, so `getCachedTokens()` returns what is
   stored for the new app and no longer the previous app's tokens.
+- Fixed: a token refresh or page-load session check still unanswered when `setAppId()` runs no
+  longer applies its answer to the new app. It changes nothing for the new app once it arrives.
 
 ### Version 0.35.2
 

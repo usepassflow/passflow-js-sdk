@@ -151,6 +151,8 @@ export interface RefreshController {
   signOutNow(cleanup: (newest?: string) => void): void;
   /** A new session in this tab (sign-in, register, setTokens): new generation, counters reset. */
   sessionStarted(): void;
+  /** Counts the sessions of this tab: an answer asked for under an earlier number is not applied. */
+  readonly generation: number;
   /** The `sub` this tab's session belongs to. */
   identity(): string | undefined;
   readonly coordinated: boolean;
@@ -1570,6 +1572,9 @@ export function createRefreshController(deps: RefreshControllerDeps): RefreshCon
     signOutNow,
     sessionStarted,
     identity,
+    get generation() {
+      return generation;
+    },
     get coordinated() {
       return port.coordinated;
     },

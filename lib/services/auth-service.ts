@@ -262,6 +262,8 @@ export class AuthService {
     // The delivery mode and session state are stored per app.
     this.tokenDeliveryManager.reload();
     this.setBffModeIfConfigured();
+    // An answer still on its way was asked for the previous app: it is not applied to this one.
+    this.refresh.sessionStarted();
   }
 
   /** With token exchange enabled the mode is BFF from the start, before any server answer. */
@@ -300,6 +302,10 @@ export class AuthService {
     // The stored cookie or BFF session is another app's: nothing of this app's to check.
     if (this.storageManager.holdsOnlyOtherAppSession()) return false;
 
+    // An answer that arrives after a new session or another app id started is not this session's.
+    const generation = this.refresh.generation;
+    const superseded = () => this.refresh.generation !== generation;
+
     // BFF mode: validate session with BFF endpoint
     if (this.tokenDeliveryManager.isBFFMode() && this.tokenExchangeConfig?.statusUrl) {
       try {
@@ -308,8 +314,9 @@ export class AuthService {
           credentials: 'include', // Include httpOnly cookies
         });
 
+        const data = response.ok ? await response.json() : undefined;
+        if (superseded()) return false;
         if (response.ok) {
-          const data = await response.json();
           if (data.authenticated) {
             this.tokenDeliveryManager.setSessionValid();
             return true;
@@ -319,6 +326,7 @@ export class AuthService {
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
       } catch (_error) {
+        if (superseded()) return false;
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
       }
@@ -332,6 +340,7 @@ export class AuthService {
       // The HttpOnly cookies go with the request. A valid session answers with the user; a 2xx
       // with anything else (a proxy's page, a followed redirect) is not one.
       const user = await this.authApi.validateSession();
+      if (superseded()) return false;
       if (!user?.id) {
         this.tokenDeliveryManager.setSessionInvalid();
         return false;
@@ -340,6 +349,7 @@ export class AuthService {
       this.subscribeStore.notify(PassflowEvent.SessionRestored, user);
       return true;
     } catch (_error) {
+      if (superseded()) return false;
       // Session invalid or network error
       this.tokenDeliveryManager.setSessionInvalid();
       return false;
